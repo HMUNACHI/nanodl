@@ -45,7 +45,7 @@ class MultiHeadSelfAttention(nn.Module):
         if mask is not None:
             mask = self.expand_mask(mask)
 
-        projections = self.projection(x)
+        projections = self.projection(inputs)
         projections = projections.reshape(batch_size, seq_length, self.num_heads, -1)
         projections = projections.transpose(0, 2, 1, 3) # [Batch, Head, SeqLen, Dims]
         query, key, value = jnp.array_split(projections, 3, axis=-1)
