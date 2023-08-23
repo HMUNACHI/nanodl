@@ -138,9 +138,9 @@ class MultiHeadCrossAttention(nn.Module):
         if mask is not None:
             mask = self.expand_mask(mask)
 
-        query = self.query_projection(context)
-        key = self.key_projection(inputs)
-        value = self.value_projection(inputs)
+        query = self.query_projection(inputs)
+        key = self.key_projection(context)
+        value = self.value_projection(context)
 
         query = query.reshape(batch_size, seq_length, self.num_heads, -1)
         key = key.reshape(batch_size, seq_length, self.num_heads, -1)
@@ -229,8 +229,8 @@ class MultiQueryAttention(nn.Module):
             mask = self.expand_mask(mask)
 
         query = self.query_projection(inputs)
-        key = self.key_projection(inputs)
-        value = self.value_projection(inputs)
+        key = self.key_projection(context)
+        value = self.value_projection(context)
 
         key = jnp.repeat(key, self.num_heads, axis=-1)
         value = jnp.repeat(value, self.num_heads, axis=-1)
