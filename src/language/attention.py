@@ -41,7 +41,7 @@ class MultiHeadSelfAttention(nn.Module):
         """
 
         batch_size, seq_length, embed_dim = inputs.shape
-
+        
         if mask is not None:
             mask = self.expand_mask(mask)
 
@@ -80,14 +80,12 @@ class MultiHeadSelfAttention(nn.Module):
         attented_outputs = jnp.matmul(attention_weights, value)
         return attented_outputs, attention_weights
 
-    
     def expand_mask(self, mask):
-        "Mask must be at least 2-dimensional with seq_length x seq_length"
-        assert mask.ndim > 2
+        assert mask.ndim > 2, "Mask must be at least 2-dimensional with seq_length x seq_length"
         if mask.ndim == 3:
-            mask = mask.unsqueeze(1)
+            mask = jnp.expand_dims(mask, 1)
         while mask.ndim < 4:
-            mask = mask.unsqueeze(0)
+            mask = jnp.expand_dims(mask, 0)
         return mask
 
 
@@ -134,7 +132,7 @@ class MultiHeadCrossAttention(nn.Module):
         """
 
         batch_size, seq_length, embed_dim = inputs.shape
-        
+
         if mask is not None:
             mask = self.expand_mask(mask)
 
@@ -176,6 +174,13 @@ class MultiHeadCrossAttention(nn.Module):
         context_vector = jnp.matmul(attention_weights, value)
         return context_vector, attention_weights
 
+    def expand_mask(self, mask):
+        assert mask.ndim > 2, "Mask must be at least 2-dimensional with seq_length x seq_length"
+        if mask.ndim == 3:
+            mask = jnp.expand_dims(mask, 1)
+        while mask.ndim < 4:
+            mask = jnp.expand_dims(mask, 0)
+        return mask
 
 
 
@@ -224,7 +229,7 @@ class MultiQueryAttention(nn.Module):
         """
 
         batch_size, seq_length, embed_dim = inputs.shape
-        
+
         if mask is not None:
             mask = self.expand_mask(mask)
 
@@ -268,3 +273,11 @@ class MultiQueryAttention(nn.Module):
         attention_weights = softmax(attention_scores, axis=-1)
         context_vector = jnp.matmul(attention_weights, value)
         return context_vector, attention_weights
+
+    def expand_mask(self, mask):
+        assert mask.ndim > 2, "Mask must be at least 2-dimensional with seq_length x seq_length"
+        if mask.ndim == 3:
+            mask = jnp.expand_dims(mask, 1)
+        while mask.ndim < 4:
+            mask = jnp.expand_dims(mask, 0)
+        return mask
