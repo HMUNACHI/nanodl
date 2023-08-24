@@ -14,6 +14,21 @@ class BERT(nn.Module):
     """
     pass
 
+class Roformer(nn.Module):
+    """
+    """
+    pass
+
+class Xoformer(nn.Module):
+    """
+    """
+    pass
+
+class Reformer(nn.Module):
+    """
+    """
+    pass
+
 class GPTBlocks(nn.Module):
     """
     """

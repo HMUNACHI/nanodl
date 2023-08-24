@@ -3,6 +3,9 @@ Implementations of various attention mechanisms variants.
 While multiple concepts can be merged into a generalised module,
 Each technique is isolated for clarity and easy copy and paste
 '''
+
+import math
+import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
@@ -10,7 +13,13 @@ from attention import *
 
 
 class PositionWiseFFN(nn.Module):  #@save
-    """The positionwise feed-forward network."""
+    """
+    Position-wise Feed-Forward Network.
+
+    Args:
+        num_hiddens (int): Number of hidden units in the feed-forward layers.
+        num_outputs (int): Number of output units in the feed-forward layers.
+    """
     num_hiddens: int
     num_outputs: int
 
@@ -25,7 +34,12 @@ class PositionWiseFFN(nn.Module):  #@save
 
 
 class AddNorm(nn.Module):  #@save
-    """The residual connection followed by layer normalization."""
+    """
+    Residual connection followed by layer normalization.
+
+    Args:
+        dropout (float): Dropout rate for the residual connection.
+    """
     dropout: int
 
     @nn.compact
@@ -36,6 +50,13 @@ class AddNorm(nn.Module):  #@save
 
 class EncoderBlock(nn.Module):
     """
+    Transformer Encoder Block.
+
+    Args:
+        input_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
     """
     input_dim : int 
     num_heads : int
@@ -60,6 +81,14 @@ class EncoderBlock(nn.Module):
 
 class TransformerEncoder(nn.Module):
     """
+    Transformer Encoder.
+
+    Args:
+        num_layers (int): Number of encoder layers.
+        input_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
     """
     num_layers : int
     input_dim : int
@@ -89,6 +118,13 @@ class TransformerEncoder(nn.Module):
 
 class DecoderBlock(nn.Module):
     """
+    Transformer Decoder Block.
+
+    Args:
+        input_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
     """
     input_dim : int 
     num_heads : int
@@ -135,6 +171,14 @@ class DecoderBlock(nn.Module):
 
 class TransformerDecoder(nn.Module):
     """
+    Transformer Decoder.
+
+    Args:
+        num_layers (int): Number of decoder layers.
+        input_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
     """
     num_layers : int
     input_dim : int
@@ -163,37 +207,57 @@ class TransformerDecoder(nn.Module):
         return attention_maps, cross_attention_maps
 
 
+
+class PositionalEncoding(nn.Module):
+    """
+    Positional Encoding.
+
+    Args:
+        num_embeddings (int): Number of embeddings.
+        features (int): Number of features in the embeddings.
+    """
+    num_embeddings: int
+    features: int
+
+    def setup(self):
+        positional_encoding = jnp.zeros((self.features, self.num_embeddings))
+        position = jnp.arange(0, self.features, dtype=jnp.float32)[:, None]
+        div_term = jnp.exp(jnp.arange(0, self.num_embeddings, 2) * (-jnp.log(10000.0) / self.num_embeddings))
+        positional_encoding = positional_encoding.at[:, 0::2].set(jnp.sin(position * div_term))
+        positional_encoding = positional_encoding.at[:, 1::2].set(jnp.cos(position * div_term))
+        plt.imshow(positional_encoding.T)
+        self.positional_encoding = positional_encoding.T
+
+    def __call__(self, x):
+        x = x + self.positional_encoding[:x.shape[1]]
+        return x
+
+
 class TokenAndPositionEmbedding(nn.Module):
     """
+    Token and Position Embedding.
+
+    Args:
+        max_len (int): Maximum sequence length.
+        vocab_size (int): Vocabulary size.
+        embed_dim (int): Embedding dimension.
     """
     max_len : int
     vocab_size : int
     embed_dim : int
+    learned_position : bool
     
     def setup(self):
         self.token_embeddings = nn.Embed(num_embeddings=self.vocab_size, features=self.embed_dim)
-        self.position_embeddings = nn.Embed(num_embeddings=self.max_len, features=self.embed_dim)
 
-    def __call__(self, inputs):
-        tokens = self.token_embeddings(inputs)
-        positions = jnp.arange(start=0, stop=inputs.shape[-1], step=1)
-        positions = self.position_embeddings(positions)
-        return tokens + positions
+        if self.learned_position:
+            self.position_embeddings = nn.Embed(num_embeddings=self.max_len, features=self.embed_dim)
+        else:
+            self.position_embeddings = PositionalEncoding(num_embeddings=self.max_len, features=self.embed_dim)
 
-
-# Test transformer and decoder
-from jax import random
-
-key = random.PRNGKey(0)
-main_rng, x_rng = random.split(key)
-x = random.normal(x_rng, (3, 16, 128))
-# Create encoder block
-encblock = TransformerEncoder(input_dim=128, num_heads=4, num_layers=2, feedforward_dim=256, dropout=0.2)
-# Initialize parameters of encoder block with random key and inputs
-main_rng, init_rng, dropout_init_rng = random.split(main_rng, 3)
-params = encblock.init({'params': init_rng, 'dropout': dropout_init_rng}, x, training=True)['params']
-# Apply encoder block with parameters on the inputs
-# Since dropout is stochastic, we need to pass a rng to the forward
-main_rng, dropout_apply_rng = random.split(main_rng)
-out = encblock.apply({'params': params}, x, training=True, rngs={'dropout': dropout_apply_rng})
-print('Out', out.shape)
+    def __call__(self, x):
+        x = self.token_embeddings(inputs)
+        if self.learned_position:
+            return x + self.position_embeddings(jnp.arange(x.shape[1]))
+        else:
+            return x + self.position_embeddings(x)
