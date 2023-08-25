@@ -9,6 +9,11 @@ class T5(nn.Module):
     """
     pass
 
+class LaMDA(nn.Module):
+    """
+    """
+    pass
+
 class BERT(nn.Module):
     """
     """
