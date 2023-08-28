@@ -7,7 +7,6 @@ Each technique is isolated for clarity and easy copy and paste **wink**
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from jax.nn import softmax
 from embeddings import RotaryPositionalEncoding
 
 
@@ -30,7 +29,9 @@ class SelfMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -97,7 +98,10 @@ class CrossMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, context, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -169,7 +173,10 @@ class MultiQueryAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, context, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -238,7 +245,11 @@ class RelativeMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, context, mask=None, clip=3):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None, 
+                 clip: int = 3) -> tuple:
 
         """
         Args:
@@ -319,7 +330,10 @@ class RotaryMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, context, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -393,7 +407,10 @@ class GatedMultiHeadAttention(nn.Module):
         self.gate = nn.Dense(features=1)
 
 
-    def __call__(self, inputs, context, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -424,7 +441,7 @@ class GatedMultiHeadAttention(nn.Module):
         value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
 
         probabilities = jax.nn.sigmoid(self.gate(value_heads))
-        booleans = random.bernoulli(random.PRNGKey(0), probabilities)
+        booleans = jax.random.bernoulli(jax.random.PRNGKey(0), probabilities)
         gate = jnp.where(booleans, 1.0, 0.0)
 
         attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
@@ -489,13 +506,13 @@ class HierarchicalMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, 
-                 word_inputs, 
-                 word_context, 
-                 sentence_inputs, 
-                 sentence_context, 
-                 word_mask=None, 
-                 sentence_mask=None):
+    def __call__(self,
+                 word_inputs: jnp.ndarray,
+                 word_context: jnp.ndarray,
+                 sentence_inputs: jnp.ndarray,
+                 sentence_context: jnp.ndarray,
+                 word_mask: jnp.ndarray = None,
+                 sentence_mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
@@ -583,7 +600,9 @@ class LocalMultiHeadAttention(nn.Module):
                                bias_init=nn.initializers.zeros)
 
 
-    def __call__(self, inputs, context, mask=None):
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray) -> tuple:
 
         """
         Args:
@@ -636,32 +655,3 @@ class LocalMultiHeadAttention(nn.Module):
         attended_values = jnp.matmul(attention_weights, value_heads)
         attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
         return attended_values, attention_weights
-    
-    
-class SparseMultiHeadAttention(nn.Module):
-    """
-    Sparse attention improves efficiency by only computing attention weights for a subset of the input sequence. 
-    This can be done by using a threshold to filter out the attention weights that are below a certain threshold.
-    """
-    pass
-
-
-class LowRankMultiHeadAttention(nn.Module):
-    """
-    Improves efficiency by approximating the attention weights using a low-dimensional matrix.
-    """
-    pass
-
-
-# MHA test
-from jax import random
-
-key = random.PRNGKey(0)
-main_rng, x_rng = random.split(key)
-x = random.normal(x_rng, (3, 16, 128))
-mh_attn = CrossMultiHeadAttention(hidden_dim=128, num_heads=4)
-main_rng, init_rng = random.split(main_rng)
-params = mh_attn.init(init_rng, x, x)['params']
-# Apply attention with parameters on the inputs
-out, attn = mh_attn.apply({'params': params}, x, x)
-print('Out', out.shape, 'Attention', attn.shape)
