@@ -4,12 +4,10 @@ While multiple concepts can be merged into a generalised module,
 Each technique is isolated for clarity and easy copy and paste
 '''
 
-import math
-import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
-from attention import *
+from attention import SelfMultiHeadAttention, CrossMultiHeadAttention
 
 
 class PositionWiseFFN(nn.Module):  #@save
@@ -46,6 +44,24 @@ class AddNorm(nn.Module):  #@save
     def __call__(self, X, Y, training=False):
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
+    
+
+class RMSAddNorm(nn.Module):  #@save
+    """
+    Residual connection followed by layer normalization.
+
+    Args:
+        dropout (float): Dropout rate for the residual connection.
+    """
+    dropout: int
+
+    @nn.compact
+    def __call__(self, x, y, training=False):
+        return self.rms_norm(nn.Dropout(self.dropout)(y, deterministic=not training) + x)
+    
+    def rms_norm(self, x, axis=None, epsilon=1e-8):
+        rms = jnp.sqrt(jnp.mean(jnp.square(x), axis=axis, keepdims=True) + epsilon)
+        return x / rms
 
 
 class EncoderBlock(nn.Module):
@@ -65,7 +81,7 @@ class EncoderBlock(nn.Module):
 
     def setup(self):
         # Attention layer
-        self.attention = MultiHeadSelfAttention(hidden_dim=self.input_dim,
+        self.attention = SelfMultiHeadAttention(hidden_dim=self.input_dim,
                                                 num_heads=self.num_heads)
         self.linear = PositionWiseFFN(self.feedforward_dim, self.input_dim)
         self.add_norm1 =  AddNorm(self.dropout)
@@ -103,16 +119,11 @@ class TransformerEncoder(nn.Module):
                                     self.dropout) for _ in range(self.num_layers)]
 
     def __call__(self, x, mask=None, training=True):
-        for layer in self.layers:
-            x, _ = layer(x, mask=mask, training=training)
-        return x
-
-    def get_attention_maps(self, x, mask=None, training=False):
         attention_maps = []
         for layer in self.layers:
             x, attention = layer(x, mask=mask, training=training)
             attention_maps.append(attention)
-        return attention_maps
+        return x, attention_maps
 
 
 
@@ -132,10 +143,10 @@ class DecoderBlock(nn.Module):
     dropout : float
 
     def setup(self):
-        self.attention1 = MultiHeadSelfAttention(hidden_dim=self.input_dim,
+        self.attention1 = SelfMultiHeadAttention(hidden_dim=self.input_dim,
                                                 num_heads=self.num_heads
                                                 )
-        self.attention2 = MultiHeadCrossAttention(hidden_dim=self.input_dim,
+        self.attention2 = CrossMultiHeadAttention(hidden_dim=self.input_dim,
                                                 num_heads=self.num_heads
                                                 )
         self.linear1 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
@@ -151,13 +162,14 @@ class DecoderBlock(nn.Module):
         mask = idx_source >= idx_destination - source_dim + destination_dim
         mask = mask.astype(jnp.int32) 
         mask = mask.reshape((1, destination_dim, source_dim))
-        concatenator = jnp.concatenate([jnp.array([batch_size]), jnp.array([1, 1], dtype=jnp.int32)], 0)
+        concatenator = jnp.concatenate([jnp.array([batch_size]), 
+                                        jnp.array([self.num_heads]), 
+                                        jnp.array([1, 1], dtype=jnp.int32)], 0)
         return jnp.tile(mask, concatenator)
 
 
     def __call__(self, x, context, mask=None, training=True):
-        batch_size, sequence_length, _ = x.shape
-        #mask = self.causal_mask(batch_size, sequence_length, sequence_length)
+        mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
         attended_x, attention1 = self.attention1(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         attended_x, attention2 = self.attention2(x, context, mask=mask)
@@ -166,7 +178,7 @@ class DecoderBlock(nn.Module):
         x = self.add_norm1(x, linear_output, training)
         linear_output = self.linear2(x)
         x = softmax(linear_output, axis=-1)
-        return x, attention1, attention2
+        return x, jnp.array(attention1), jnp.array(attention2)
 
 
 class TransformerDecoder(nn.Module):
@@ -179,6 +191,8 @@ class TransformerDecoder(nn.Module):
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+
+        
     """
     num_layers : int
     input_dim : int
@@ -193,71 +207,27 @@ class TransformerDecoder(nn.Module):
                                     self.dropout) for _ in range(self.num_layers)]
 
     def __call__(self, x, context, mask=None, training=True):
-        for layer in self.layers:
-            x, _ , _ = layer(x, context, training=training)
-        return x
-
-    def get_attention_maps(self, x, context, training=False):
         attention_maps = []
         cross_attention_maps = []
         for layer in self.layers:
             x, attention, cross_attention = layer(x, context, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
-        return attention_maps, cross_attention_maps
-
-
-
-class PositionalEncoding(nn.Module):
-    """
-    Positional Encoding.
-
-    Args:
-        num_embeddings (int): Number of embeddings.
-        features (int): Number of features in the embeddings.
-    """
-    num_embeddings: int
-    features: int
-
-    def setup(self):
-        positional_encoding = jnp.zeros((self.features, self.num_embeddings))
-        position = jnp.arange(0, self.features, dtype=jnp.float32)[:, None]
-        div_term = jnp.exp(jnp.arange(0, self.num_embeddings, 2) * (-jnp.log(10000.0) / self.num_embeddings))
-        positional_encoding = positional_encoding.at[:, 0::2].set(jnp.sin(position * div_term))
-        positional_encoding = positional_encoding.at[:, 1::2].set(jnp.cos(position * div_term))
-        plt.imshow(positional_encoding.T)
-        self.positional_encoding = positional_encoding.T
-
-    def __call__(self, x):
-        x = x + self.positional_encoding[:x.shape[1]]
-        return x
-
-
-class TokenAndPositionEmbedding(nn.Module):
-    """
-    Token and Position Embedding.
-
-    Args:
-        max_len (int): Maximum sequence length.
-        vocab_size (int): Vocabulary size.
-        embed_dim (int): Embedding dimension.
-    """
-    max_len : int
-    vocab_size : int
-    embed_dim : int
-    learned_position : bool
+        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
     
-    def setup(self):
-        self.token_embeddings = nn.Embed(num_embeddings=self.vocab_size, features=self.embed_dim)
 
-        if self.learned_position:
-            self.position_embeddings = nn.Embed(num_embeddings=self.max_len, features=self.embed_dim)
-        else:
-            self.position_embeddings = PositionalEncoding(num_embeddings=self.max_len, features=self.embed_dim)
+# Transformer test
+from jax import random
 
-    def __call__(self, x):
-        x = self.token_embeddings(inputs)
-        if self.learned_position:
-            return x + self.position_embeddings(jnp.arange(x.shape[1]))
-        else:
-            return x + self.position_embeddings(x)
+key = random.PRNGKey(0)
+main_rng, x_rng = random.split(key)
+x = random.normal(x_rng, (3, 16, 128))
+encblock = TransformerDecoder(input_dim=128, num_heads=4, num_layers=2, feedforward_dim=256, dropout=0.2)
+# Initialize parameters of encoder block with random key and inputs
+main_rng, init_rng, dropout_init_rng = random.split(main_rng, 3)
+params = encblock.init({'params': init_rng, 'dropout': dropout_init_rng}, x, x, training=True)['params']
+# Apply encoder block with parameters on the inputs
+# Since dropout is stochastic, we need to pass a rng to the forward
+main_rng, dropout_apply_rng = random.split(main_rng)
+out, att1, att2 = encblock.apply({'params': params}, x, x, training=True, rngs={'dropout': dropout_apply_rng})
+print('Out', out.shape, att1.shape, att2.shape)
