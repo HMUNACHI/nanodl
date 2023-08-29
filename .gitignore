@@ -1,0 +1,30 @@
+# Ignore compiled object files, libraries, and executables
+*.o
+*.a
+*.exe
+
+# Ignore system-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+
+# Ignore build directories
+/build/
+/dist/
+/node_modules/
+
+# Ignore configuration files with sensitive information
+config.ini
+secrets.yaml
+
+# Ignore user-specific files
+/userdata/
+/user-settings.json
+
+# ignore specific files
+test.py
+/vision/
+/trainer/
