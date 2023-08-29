@@ -69,8 +69,6 @@ class SelfMultiHeadAttention(nn.Module):
         return attended_values, attention_weights
 
 
-
-
 class CrossMultiHeadAttention(nn.Module):
     """
     https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
