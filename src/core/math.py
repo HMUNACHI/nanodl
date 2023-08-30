@@ -20,6 +20,7 @@ def derivative(f, x, h=0.0001):
     """
     return (f(x + h) - f(x)) / h
 
+
 def integral(f, a, b, h=0.0001):
     """
     Calculate the numerical integral of a function over a specified interval.

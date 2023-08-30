@@ -97,7 +97,11 @@ class KnowledgeGraph:
         """
         self.nodes[node_id] = node_data
 
-    def add_edge(self, edge_id: str, source_node_id: str, target_node_id: str, edge_data: Dict[str, Any]):
+    def add_edge(self, 
+                 edge_id: str, 
+                 source_node_id: str, 
+                 target_node_id: str, 
+                 edge_data: Dict[str, Any]):
         """
         Add an edge to the knowledge graph.
 
@@ -215,7 +219,8 @@ def extract_ngrams(sequences: List[List[str]], n: int) -> jnp.ndarray:
     return outputs
 
 
-def zero_pad_sequences_2d(sequences, max_length):
+def zero_pad_sequences_2d(sequences: List[np.ndarray], 
+                          max_length: int) -> List[np.ndarray]:
     """
     Zero-pad a list of 2D sequences along axis 1 to a specified maximum length.
     
@@ -363,7 +368,7 @@ def bleu(hypotheses: List[str], references: List[str], max_ngram: int = 4) -> fl
 
 
 
-def meteor(reference, hypothesis):
+def meteor(hypothesis: str, reference: str) -> float: 
     """
     Calculates the METEOR score between a reference and hypothesis sentence.
     
@@ -463,7 +468,7 @@ def meteor(reference, hypothesis):
     return meteor_score
 
 
-def cider_score(reference, hypothesis):
+def cider_score(hypothesis: str, reference: str) -> float: 
     """
     Calculates the CIDEr score between a reference and hypothesis sentence.
     
@@ -558,7 +563,7 @@ def perplexity(log_probs: List[float]) -> float:
 
 
 
-def word_error_rate(hypotheses, references):
+def word_error_rate(hypotheses: List[int], references: List[int]) -> float: 
     """
     Calculate the Word Error Rate (WER) metric.
 
