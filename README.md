@@ -1,5 +1,7 @@
 
 ![Alt text](/images/logo.png)
+
+
 Welcome to the Jax-Models repository! This repository is a curated collection of deep learning concepts, models, algorithms, and more, all implemented from scratch using JAX, a powerful numerical computing library. Our goal is to provide a comprehensive resource for both beginners and experienced practitioners in the field of artificial intelligence. The codes are designed for easy copy and paste, and we try to be as detailed as possible in the documentation. Each implementation will be roll out once all tests are passed, watch and star to keep up!
 
 # Authors
