@@ -255,6 +255,186 @@ class BytePairEncoder:
         return padded_sequence
 
 
+class PlainTextDataset:
+    """
+    A dataset class for loading texts.
+
+    Args:
+    - root_dir (str): The root directory containing text files.
+    - tokenizer (BytePairEncoder): A tokenizer to encode the text data.
+
+    Attributes:
+    - root_dir (str): The root directory containing text files.
+    - file_list (list): List of filenames in the root directory ending with '.txt'.
+    - tokenizer (BytePairEncoder): A tokenizer for text encoding.
+
+    Methods:
+    - __len__(): Returns the number of files in the dataset.
+    - __getitem__(idx): Loads and encodes the text data at the given index.
+
+    """
+
+    def __init__(self, root_dir, tokenizer):
+        """
+        Initializes the CausalTextDataset with the root directory and tokenizer.
+
+        Args:
+        - root_dir (str): The root directory containing text files.
+        - tokenizer (BytePairEncoder): A tokenizer to encode the text data.
+        """
+        self.root_dir = root_dir
+        self.file_list = [f for f in os.listdir(root_dir) if f.endswith('.txt')]
+        self.tokenizer = tokenizer
+    
+    def __len__(self):
+        """
+        Returns the number of files in the dataset.
+        """
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        """
+        Loads and encodes the text data at the given index.
+
+        Args:
+        - idx (int): Index of the file to load.
+
+        Returns:
+        - input_seq (list): Encoded input sequence.
+        - target_seq (list): Encoded target sequence (shifted by one token).
+        """
+        file_path = os.path.join(self.root_dir, self.file_list[idx])
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        return self.tokenizer.encode(text)
+
+
+
+class PlainTextData:
+    """
+    A class for managing causal language modeling text data.
+
+    Args:
+    - data_directory (str): Directory containing text files.
+    - batch_size (int): Batch size for data loaders.
+    - max_length (int): Maximum sequence length for the tokenizer.
+    - vocab_size (int, optional): Vocabulary size for the tokenizer. Default is 1000.
+    - validation_split (float, optional): Proportion of data for validation. Default is 0.2.
+    - shuffle (bool, optional): Whether to shuffle data. Default is True.
+    - corpus_save_path (str, optional): Path to save the corpus. Default is None.
+    - preprocess_fn: A function which accepts List[str] and return same
+                         This is where to include concepts like lower, etc.
+
+    Attributes:
+    - batch_size (int): Batch size for data loaders.
+    - validation_split (float): Proportion of data for validation.
+    - shuffle (bool): Whether to shuffle data.
+    - tokenizer (BytePairEncoder): Tokenizer for text encoding.
+    - text_dataset (CausalTextDataset): Dataset containing encoded text.
+    - train_dataset (list): List of training samples from the dataset.
+    - val_dataset (list): List of validation samples from the dataset.
+    - train_loader (TextDataLoader): Data loader for training data.
+    - val_loader (TextDataLoader): Data loader for validation data.
+
+    Methods:
+    - create_corpus(data_directory, corpus_save_path=None): Creates a corpus from text files.
+    - create_dataloader(dataset): Creates a data loader for the given dataset.
+
+    Example:
+    ```
+    causal_text_data = CausalTextData(data_directory='data', batch_size=32, max_length=128)
+    for batch in causal_text_data.train_loader:
+        # Process training batch
+    ```
+
+    """
+
+    def __init__(self, 
+                 data_directory, 
+                 batch_size, 
+                 max_length,
+                 vocab_size=1000, 
+                 validation_split=0.2, 
+                 shuffle=True, 
+                 corpus_save_path=None,
+                 preprocess_fn=None):
+        """
+        Initializes the CausalTextData with the specified parameters.
+
+        Args:
+        - batch_size (int): Batch size for data loaders.
+        - max_length (int): Maximum sequence length for the tokenizer.
+        - vocab_size (int, optional): Vocabulary size for the tokenizer. Default is 1000.
+        - validation_split (float, optional): Proportion of data for validation. Default is 0.2.
+        - shuffle (bool, optional): Whether to shuffle data. Default is True.
+        - corpus_save_path (str, optional): Path to save the corpus. Default is None.
+        - preprocess_fn: A function which accepts List[str] and return same
+                         This is where to include concepts like lower, etc.
+        """
+        self.batch_size = batch_size
+        self.validation_split = validation_split
+        self.shuffle = shuffle
+        self.tokenizer = BytePairEncoder(vocab_size, max_length, preprocess_fn)
+        self.tokenizer.learn_bpe(self.create_corpus(data_directory, corpus_save_path))
+        self.text_dataset = CausalTextDataset(data_directory, self.tokenizer)
+        
+        # Split the dataset into training and validation sets
+        num_samples = len(self.text_dataset)
+        num_validation = int(num_samples * validation_split)
+        num_train = num_samples - num_validation
+        
+        indices = list(range(num_samples))
+        if shuffle:
+            random.shuffle(indices)
+        
+        train_indices, val_indices = indices[:num_train], indices[num_train:]
+        self.train_dataset = [self.text_dataset[idx] for idx in train_indices]
+        self.val_dataset = [self.text_dataset[idx] for idx in val_indices]
+        
+        self.train_loader = self.create_dataloader(self.train_dataset)
+        self.val_loader = self.create_dataloader(self.val_dataset)
+
+    def create_corpus(self, data_directory, corpus_save_path=None):
+        """
+        Creates a corpus from text files in the given directory.
+
+        Args:
+        - data_directory (str): Directory containing text files.
+        - corpus_save_path (str, optional): Path to save the corpus. Default is None.
+
+        Returns:
+        - corpus (list): List of text samples from the files.
+        """
+        corpus = []
+        file_list = [f for f in os.listdir(data_directory) if f.endswith('.txt')]
+        
+        for filename in file_list:
+            file_path = os.path.join(data_directory, filename)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+                corpus.append(text)
+        
+        if corpus_save_path:
+            with open(corpus_save_path, 'w', encoding='utf-8') as f:
+                for text in corpus:
+                    f.write(text + '\n')
+            print(f"Corpus saved to {corpus_save_path}")
+            
+        return corpus
+    
+    def create_dataloader(self, dataset):
+        """
+        Creates a data loader for the given dataset.
+
+        Args:
+        - dataset (list): List of samples for the data loader.
+
+        Returns:
+        - dataloader (TextDataLoader): Data loader for the dataset.
+        """
+        return TextDataLoader(dataset, self.batch_size, shuffle=self.shuffle)
+
+
 
 class CausalTextDataset:
     """
