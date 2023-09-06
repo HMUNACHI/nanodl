@@ -7,7 +7,7 @@ Each technique is isolated for clarity and easy copy and paste **wink**
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from embeddings import RotaryPositionalEncoding
+from _embeddings import RotaryPositionalEncoding
 
 
 class SelfMultiHeadAttention(nn.Module):

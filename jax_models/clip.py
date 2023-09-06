@@ -6,7 +6,7 @@ import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 
-from transformer import TransformerEncoder
+from _transformer import TransformerEncoder
 
 class Clip(nn.Module):
     embed_dim : int

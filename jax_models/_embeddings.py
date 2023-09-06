@@ -160,3 +160,7 @@ class RotaryPositionalEncoding():
             self.apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached)[0],
             self.apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached)[0],
         )
+    
+
+class PatchEmbedding(nn.Module):
+    pass

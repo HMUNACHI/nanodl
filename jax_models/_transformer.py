@@ -7,7 +7,7 @@ Each technique is isolated for clarity and easy copy and paste
 import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
-from attention import SelfMultiHeadAttention, CrossMultiHeadAttention
+from _attention import SelfMultiHeadAttention, CrossMultiHeadAttention
 
 class PositionWiseFFN(nn.Module):
     """
