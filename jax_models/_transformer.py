@@ -9,6 +9,61 @@ import flax.linen as nn
 from jax.nn import softmax
 from _attention import SelfMultiHeadAttention, CrossMultiHeadAttention
 
+class PositionalEncoding(nn.Module):
+    """
+    Positional Encoding.
+
+    Args:
+        num_embeddings (int): Number of embeddings.
+        features (int): Number of features in the embeddings.
+    """
+    num_embeddings: int
+    features: int
+
+    def setup(self):
+        positional_encoding = jnp.zeros((self.features, self.num_embeddings))
+        position = jnp.arange(0, self.features, dtype=jnp.float32)[:, None]
+        div_term = jnp.exp(jnp.arange(0, self.num_embeddings, 2) * (-jnp.log(10000.0) / self.num_embeddings))
+        positional_encoding = positional_encoding.at[:, 0::2].set(jnp.sin(position * div_term))
+        positional_encoding = positional_encoding.at[:, 1::2].set(jnp.cos(position * div_term))
+        self.positional_encoding = positional_encoding.T
+
+    def __call__(self, x):
+        x = x + self.positional_encoding[:x.shape[1]]
+        return x
+
+
+class TokenAndPositionEmbedding(nn.Module):
+    """
+    Token and Position Embedding.
+
+    Args:
+        max_len (int): Maximum sequence length.
+        vocab_size (int): Vocabulary size.
+        embed_dim (int): Embedding dimension.
+    """
+    max_len : int
+    vocab_size : int
+    embed_dim : int
+    learned_position : bool
+    
+    def setup(self):
+        self.token_embeddings = nn.Embed(num_embeddings=self.vocab_size, features=self.embed_dim)
+
+        if self.learned_position:
+            self.position_embeddings = nn.Embed(num_embeddings=self.max_len, features=self.embed_dim)
+        else:
+            self.position_embeddings = PositionalEncoding(num_embeddings=self.max_len, features=self.embed_dim)
+
+    def __call__(self, x):
+        x = self.token_embeddings(x)
+        if self.learned_position:
+            return x + self.position_embeddings(jnp.arange(x.shape[1]))
+        else:
+            return x + self.position_embeddings(x)
+    
+
+
 class PositionWiseFFN(nn.Module):
     """
     Position-wise Feed-Forward Network.
@@ -34,7 +89,7 @@ class PositionWiseFFN(nn.Module):
         Returns:
             jnp.ndarray: Output tensor after applying the feed-forward network.
         """
-        return self.dense2(nn.relu(self.dense1(X)))
+        return self.dense2(nn.gelu(self.dense1(X)))
 
 class AddNorm(nn.Module):
     """
@@ -150,6 +205,7 @@ class EncoderBlock(nn.Module):
         x = self.add_norm1(x, linear_output, training)
         return x, attention
 
+
 class TransformerEncoder(nn.Module):
     """
     Transformer Encoder.
@@ -174,7 +230,10 @@ class TransformerEncoder(nn.Module):
                                     self.dropout)
                        for _ in range(self.num_layers)]
 
-    def __call__(self, x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = True) -> tuple:
+    def __call__(self, 
+                 x: jnp.ndarray, 
+                 mask: jnp.ndarray = None, 
+                 training: bool = True) -> tuple:
         """
         Apply the TransformerEncoder to input data.
 

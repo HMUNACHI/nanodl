@@ -7,7 +7,6 @@ Each technique is isolated for clarity and easy copy and paste **wink**
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from _embeddings import RotaryPositionalEncoding
 
 
 class SelfMultiHeadAttention(nn.Module):
@@ -300,6 +299,110 @@ class RelativeMultiHeadAttention(nn.Module):
         return attended_values, attention_weights
     
 
+
+class RotaryPositionalEncoding():
+    """
+    The rotary position embeddings from RoFormer_ (Su et. al).
+    A crucial insight from the method is that the query and keys are
+    transformed by rotation matrices which depend on the relative positions.
+
+    Other implementations are available in the Rotary Transformer repo_ and in
+    GPT-NeoX_, GPT-NeoX was an inspiration
+
+    .. _RoFormer: https://arxiv.org/abs/2104.09864
+    .. _repo: https://github.com/ZhuiyiTechnology/roformer
+    .. _GPT-NeoX: https://github.com/EleutherAI/gpt-neox
+
+
+    .. This is implemented outside nn module as is modifies an external state
+       It is also puporsefully broken down for explainability
+    """
+
+    def __init__(self, dim_model: int):
+        """
+        Args:
+            dim_model: The dimension of the input and output embeddings.
+        """
+        super().__init__()
+        self.dim_model = dim_model
+
+        inv_freq = 1.0 / (10000 ** (jnp.arange(0, dim_model, 2, dtype=jnp.float32) / dim_model))
+        self.inv_freq = inv_freq
+
+        self._seq_len_cached = None
+        self._cos_cached = None
+        self._sin_cached = None
+
+    def _update_cos_sin_tables(self, x, seq_dimension=1):
+        """
+        Update the cached cosine and sine tables, if necessary.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+            seq_dimension: The dimension that represents the sequence length.
+
+        Returns:
+            The updated cosine and sine tables.
+        """
+        seq_len = x.shape[seq_dimension]
+
+        if seq_len != self._seq_len_cached:
+            self._seq_len_cached = seq_len
+            t = jnp.arange(seq_len, dtype=self.inv_freq.dtype)
+            freqs = jnp.outer(t, self.inv_freq)
+            emb = jnp.concatenate((freqs, freqs), axis=-1)
+            self._cos_cached = jnp.cos(emb)[None, None, :, :]
+            self._sin_cached = jnp.sin(emb)[None, None, :, :]
+
+        return self._cos_cached, self._sin_cached
+
+    def rotate_half(self, x):
+        """
+        Split the input tensor into two halves, rotate the second half by 180 degrees, and concatenate the two halves back together.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+
+        Returns:
+            The rotated tensor.
+        """
+        x1, x2 = jnp.split(x, 2, axis=-1)
+        return jnp.concatenate((-x2, x1), axis=-1)
+
+    def apply_rotary_pos_emb(self, x, cos, sin):
+        """
+         Apply the rotary position embeddings to the input tensor.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+            cos: The cosine table, of shape `(batch_size, 1, seq_len, dim)`.
+            sin: The sine table, of shape `(batch_size, 1, seq_len, dim)`.
+
+        Returns:
+            The embedded tensor.
+        """
+        cos = cos[:, :, : x.shape[-2], :]
+        sin = sin[:, :, : x.shape[-2], :]
+        return (x * cos) + (self.rotate_half(x) * sin)
+
+    def __call__(self, q, k):
+        """
+         Apply the rotary position embeddings to the query and key tensors.
+
+        Args:
+            q: The query tensor, of shape `(batch_size, seq_len, dim)`.
+            k: The key tensor, of shape `(batch_size, seq_len, dim)`.
+
+        Returns:
+            The embedded query and key tensors.
+        """
+        self._cos_cached, self._sin_cached = self._update_cos_sin_tables(k, seq_dimension=-2)
+
+        return (
+            self.apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached)[0],
+            self.apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached)[0],
+        )
+    
 
 class RotaryMultiHeadAttention(nn.Module):
     """
