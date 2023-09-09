@@ -269,5 +269,5 @@ class ViT(nn.Module):
         jax.numpy.ndarray: Attention maps from the transformer encoder.
         """
         x = self.embedding(x)
-        x, attention_maps = self.blocks(x=x, mask=mask, training=training)
+        x, attention_maps = self.blocks(x=x, mask=mask, training=training)#
         return self.output(x), attention_maps
