@@ -8,8 +8,62 @@ import flax.linen as nn
 from _vit import ViT
 from _transformer import TransformerEncoder
 from typing import Tuple
+from functools import partial
 
 class Clip(nn.Module):
+    """
+    CLIP (Contrastive Language-Image Pretraining) model.
+
+    Args:
+    - embed_dim (int): Dimension of the shared embedding space.
+    - dropout (float): Dropout rate for model layers.
+    - n_outputs (int): Number of output classes.
+    - num_heads (int): Number of attention heads in the transformer layers.
+    - feedforward_dim (int): Dimension of the feedforward network in transformer layers.
+    - num_layers_text (int): Number of transformer layers for text encoding.
+    - input_dim_text (int): Input dimension for text data.
+    - image_patch_size (int): Size of image patches.
+    - input_dim_image (int): Input dimension for image data.
+    - num_layers_images (int): Number of transformer layers for image encoding.
+
+    Methods:
+    - setup(): Initializes the model components and parameters.
+    - __call__(texts, images, training): Computes embeddings for text and images.
+    - get_attention_maps(texts, images): Computes attention maps for text and images.
+    - encode_text(texts): Encodes text data using the text encoder.
+    - encode_image(images): Encodes image data using the image encoder.
+    - embed_text(texts): Embeds text data into the shared embedding space.
+    - embed_image(images): Embeds image data into the shared embedding space.
+
+    Example:
+    key = jax.random.PRNGKey(0)
+    main_rng, init_rng, dropout_init_rng = jax.random.split(key, 3)
+    texts = jax.random.normal(jax.random.PRNGKey(10), (3, 16, 128))
+    images = jax.random.normal(jax.random.PRNGKey(20),(3,256,256,3))
+    patch_size = (16, 16)
+    input_dim = int((images.shape[1] * images.shape[2]) / (patch_size[0] * patch_size[1]))
+
+    # Initialise model
+    clip = Clip(embed_dim = 256,
+                dropout = 0.2,
+                n_outputs = 256,
+                num_heads = 4,
+                feedforward_dim = 256,
+                num_layers_text = 2,
+                input_dim_text = 128,
+                image_patch_size = patch_size,
+                input_dim_image = input_dim,
+                num_layers_images = 2)
+
+    # Setup parameters
+    params = clip.init({'params': init_rng, 'dropout': dropout_init_rng},
+                        texts, 
+                        images,
+                        training=True)['params']
+
+    print('Number of parameters:', sum(x.size for x in jax.tree_leaves(params)))
+    main_rng, dropout_apply_rng = jax.random.split(main_rng)
+    """
     embed_dim : int
     dropout: float
     n_outputs: int
@@ -22,65 +76,185 @@ class Clip(nn.Module):
     num_layers_images: int
 
     def setup(self):
-        self.text_encoder = TransformerEncoder(input_dim=self.input_dim_text, 
-                                               num_heads=self.num_heads, 
-                                               num_layers=self.num_layers_text, 
-                                               feedforward_dim=self.feedforward_dim, 
-                                               dropout=self.dropout
-                                               )
-        self.image_encoder = ViT(patch_size=self.image_patch_size,
-                                num_layers=self.num_layers_images,
-                                input_dim=self.input_dim_image, 
-                                num_heads=self.num_heads, 
-                                feedforward_dim=self.feedforward_dim, 
-                                dropout=self.dropout,
-                                n_outputs=self.n_outputs
-                                )
+        """
+        Initializes the model components and parameters.
+        """
+        self.text_encoder = TransformerEncoder(
+            input_dim=self.input_dim_text,
+            num_heads=self.num_heads,
+            num_layers=self.num_layers_text,
+            feedforward_dim=self.feedforward_dim,
+            dropout=self.dropout,
+        )
+        self.image_encoder = ViT(
+            patch_size=self.image_patch_size,
+            num_layers=self.num_layers_images,
+            input_dim=self.input_dim_image,
+            num_heads=self.num_heads,
+            feedforward_dim=self.feedforward_dim,
+            dropout=self.dropout,
+            n_outputs=self.n_outputs,
+        )
         self.text_projection = nn.Dense(self.embed_dim)
         self.image_projection = nn.Dense(self.embed_dim)
         self.temperature = self.param('temperature', nn.initializers.zeros, ())
 
     def __call__(self, texts, images, training):
+        """
+        Computes embeddings for text and images.
+
+        Args:
+        - texts (jax.numpy.ndarray): Input text data.
+        - images (jax.numpy.ndarray): Input image data.
+        - training (bool): Indicates whether the model is in training mode.
+
+        Returns:
+        - text_embedding (jax.numpy.ndarray): Embedding of the input text data.
+        - image_embedding (jax.numpy.ndarray): Embedding of the input image data.
+        - temperature (float): Scaling factor for logits.
+        """
         # Get encoded representations
-        text_latents, text_attention = self.text_encoder(texts, training=training)
-        image_latents, image_attention = self.image_encoder(images, training=training)
+        text_latents, _ = self.text_encoder(texts, training=training)
+        image_latents, _ = self.image_encoder(images, training=training)
+
+        # Flatten tensors
+        text_latents = jax.vmap(jnp.ravel)(text_latents)
+        image_latents = jax.vmap(jnp.ravel)(image_latents)
 
         # Project latents onto shared embedding space
         text_embedding = self.text_projection(text_latents)
         image_embedding = self.image_projection(image_latents)
 
-        # L2 Normalisation
-        text_embedding = text_embedding / jnp.sqrt(jnp.einsum('ij,ij->', text_embedding, text_embedding))
-        image_embedding = image_embedding / jnp.sqrt(jnp.einsum('ij,ij->', image_embedding, image_embedding))
+        return text_embedding, image_embedding, self.temperature
 
-        # Scaled pairwise cosine similarities [n, n]
-        logits = jnp.dot(image_embedding, text_embedding.T) * jnp.exp(self.temperature)
-        return logits, text_attention, image_attention
-    
+    def get_attention_maps(self, texts, images):
+        """
+        Computes attention maps for text and images.
+
+        Args:
+        - texts (jax.numpy.ndarray): Input text data.
+        - images (jax.numpy.ndarray): Input image data.
+
+        Returns:
+        - text_attention (jax.numpy.ndarray): Attention maps for text encoding.
+        - image_attention (jax.numpy.ndarray): Attention maps for image encoding.
+        """
+        _, text_attention = self.text_encoder(texts, training=False)
+        _, image_attention = self.image_encoder(images, training=False)
+        return text_attention, image_attention
+
     def encode_text(self, texts):
+        """
+        Encodes text data using the text encoder.
+
+        Args:
+        - texts (jax.numpy.ndarray): Input text data.
+
+        Returns:
+        - text_encoding (jax.numpy.ndarray): Encoded text representation.
+        """
         return self.text_encoder(texts)
 
     def encode_image(self, images):
+        """
+        Encodes image data using the image encoder.
+
+        Args:
+        - images (jax.numpy.ndarray): Input image data.
+
+        Returns:
+        - image_encoding (jax.numpy.ndarray): Encoded image representation.
+        """
         return self.image_encoder(images)
 
     def embed_text(self, texts):
+        """
+        Embeds text data into the shared embedding space.
+
+        Args:
+        - texts (jax.numpy.ndarray): Input text data.
+
+        Returns:
+        - text_embedding (jax.numpy.ndarray): Embedded text representation.
+        """
         return self.text_projection(self.text_encoder(texts))
 
     def embed_image(self, images):
-        self.image_projection(self.image_encoder(images))
+        """
+        Embeds image data into the shared embedding space.
+
+        Args:
+        - images (jax.numpy.ndarray): Input image data.
+
+        Returns:
+        - image_embedding (jax.numpy.ndarray): Embedded image representation.
+        """
+        return self.image_projection(self.image_encoder(images))
     
-@jax.vmap
-def l2_normalise(x):
-    return x / jnp.linalg.norm(x)
 
 @jax.value_and_grad
 @jax.jit
-def clip_loss (logits):
-    "Uses cross entropy"
-    labels = jnp.arange(logits.shape[0])
-    text_loss = -jnp.sum(labels * jax.nn.log_softmax(logits, axis=1), axis=1)
-    image_loss = -jnp.sum(labels * jax.nn.log_softmax(logits, axis=0), axis=0)
-    return (image_loss + text_loss) / 2
+def clip_loss(text_embeddings, image_embeddings, temperature):
+    """
+    Compute the CLIP loss between image and text embeddings.
+
+    Args:
+    - image_embeddings (jax.numpy.ndarray): Image embeddings with shape (batch_size, embedding_size).
+    - text_embeddings (jax.numpy.ndarray): Text embeddings with shape (batch_size, embedding_size).
+    - temperature (float): Scaling factor for the logits.
+
+    Returns:
+    - float: Mean CLIP loss.
+
+    The function calculates the CLIP loss, which measures the similarity between image and text embeddings
+    by computing the cross-entropy loss between predicted and target distributions.
+
+    - Calculate L2 normalization for both image and text embeddings.
+    - Calculate logits as the dot product of text and image embeddings, divided by the temperature.
+    - Compute image and text similarity matrices.
+    - Calculate the target distribution as the softmax of the average similarity matrix.
+    - Calculate cross-entropy loss for both images and texts.
+    - Compute the final loss as the average of both losses.
+
+    Note:
+    - The @partial decorator is used to apply jax.vmap with specific in_axes.
+    - jax.nn.log_softmax and jax.nn.softmax are used for numerical stability.
+    """
+    def l2_normalise(x):
+        return x / jnp.linalg.norm(x, axis=-1, keepdims=True)
+
+    def cross_entropy(preds, targets, reduction='none'):
+        log_softmax = jax.nn.log_softmax
+        loss = (-targets * log_softmax(preds)).sum(axis=1)
+        if reduction == "none":
+            return loss
+        elif reduction == "mean":
+            return loss.mean()
+
+    # L2 normalize both image and text embeddings
+    text_embeddings = l2_normalise(text_embeddings)
+    image_embeddings = l2_normalise(image_embeddings)
+    
+    # Calculate logits
+    logits = (jnp.dot(text_embeddings, image_embeddings.T)) / temperature
+
+    # Calculate image and text similarity matrices
+    images_similarity = jnp.dot(image_embeddings, image_embeddings.T)
+    texts_similarity = jnp.dot(text_embeddings, text_embeddings.T)
+
+    # Calculate the target distribution as the softmax of the average similarity matrix
+    targets = jax.nn.softmax(
+        (images_similarity + texts_similarity) / 2 * temperature, axis=-1
+    )
+
+    # Calculate cross-entropy loss for both images and texts
+    texts_loss = cross_entropy(logits, targets, reduction='none')
+    images_loss = cross_entropy(jnp.transpose(logits), jnp.transpose(targets), reduction='none')
+
+    # Compute the final loss as the average of both losses
+    loss = (images_loss + texts_loss) / 2.0 
+
+    return loss.mean()
 
 
 def train(config: dict, 
@@ -138,13 +312,13 @@ def train(config: dict,
     for epoch in epochs:
         train_losses = []
         for text_batch, image_batch in train_loader:
-            logits, _, _ = clip.apply({'params': params}, 
-                                text_batch, 
-                                image_batch, 
-                                training=True, 
-                                rngs={'dropout': dropout_apply_rng}
-                                )
-            train_loss, grads = clip_loss(logits)
+            text_embedding, image_embedding, temperature = clip.apply({'params': params}, 
+                                                                        text_batch, 
+                                                                        image_batch, 
+                                                                        training=True, 
+                                                                        rngs={'dropout': dropout_apply_rng}
+                                                                        )
+            train_loss, grads = clip_loss(text_embedding, image_embedding, temperature)
             updates, opt_state = optax_optimizer.update(grads, opt_state, params=params)
             params =  optax.apply_updates(params=params, updates=updates)
             train_losses.append(train_loss)
@@ -152,13 +326,13 @@ def train(config: dict,
 
         val_losses = []
         for text_batch, image_batch in val_loader:
-            logits, _, _ = clip.apply({'params': params}, 
-                                text_batch, 
-                                image_batch, 
-                                training=True, 
-                                rngs={'dropout': dropout_apply_rng}
-                                )
-            val_loss, _ = clip_loss(logits)
+            text_embedding, image_embedding, temperature = clip.apply({'params': params}, 
+                                                                        text_batch, 
+                                                                        image_batch, 
+                                                                        training=True, 
+                                                                        rngs={'dropout': dropout_apply_rng}
+                                                                        )
+            val_loss, _ = clip_loss(text_embedding, image_embedding, temperature)
             val_losses.append(val_loss)
             # ... do whatever with losses ...
 
@@ -166,32 +340,3 @@ def train(config: dict,
         pickle.dump(params, open(os.path.join(checkpoint_directory, str(epoch)), "wb"))
 
     return
-
-
-key = jax.random.PRNGKey(0)
-main_rng, init_rng, dropout_init_rng = jax.random.split(key, 3)
-texts = jax.random.normal(jax.random.PRNGKey(10), (3, 16, 128))
-images = jax.random.normal(jax.random.PRNGKey(20),(3,256,256,3))
-patch_size = (16, 16)
-input_dim = int((images.shape[1] * images.shape[2]) / (patch_size[0] * patch_size[1]))
-
-# Initialise model
-clip = Clip(embed_dim = 256,
-            dropout = 0.2,
-            n_outputs = 256,
-            num_heads = 4,
-            feedforward_dim = 256,
-            num_layers_text = 2,
-            input_dim_text = 128,
-            image_patch_size = patch_size,
-            input_dim_image = input_dim,
-            num_layers_images = 2)
-
-# Setup parameters
-params = clip.init({'params': init_rng, 'dropout': dropout_init_rng},
-                    texts, 
-                    images,
-                    training=True)['params']
-
-print('Number of parameters:', sum(x.size for x in jax.tree_leaves(params)))
-main_rng, dropout_apply_rng = jax.random.split(main_rng)

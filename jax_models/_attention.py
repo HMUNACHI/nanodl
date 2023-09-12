@@ -542,7 +542,7 @@ class GatedMultiHeadAttention(nn.Module):
         value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
 
         probabilities = jax.nn.sigmoid(self.gate(value_heads))
-        booleans = jax.random.bernoulli(jax.random.PRNGKey(0), probabilities)
+        booleans = jax.random.bernoulli(jax.random.PRNGKey(0), probabilities) 
         gate = jnp.where(booleans, 1.0, 0.0)
 
         attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
