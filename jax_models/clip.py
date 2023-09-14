@@ -118,8 +118,8 @@ class Clip(nn.Module):
         image_latents, _ = self.image_encoder(images, training=training)
 
         # Flatten tensors
-        text_latents = jax.vmap(jnp.ravel)(text_latents)
-        image_latents = jax.vmap(jnp.ravel)(image_latents)
+        # text_latents = jax.vmap(jnp.ravel)(text_latents)
+        # image_latents = jax.vmap(jnp.ravel)(image_latents)
 
         # Project latents onto shared embedding space
         text_embedding = self.text_projection(text_latents)
@@ -192,8 +192,7 @@ class Clip(nn.Module):
         return self.image_projection(self.image_encoder(images))
     
 
-@jax.value_and_grad
-@jax.jit
+@partial(jax.vmap, in_axes=(0, 0, None))
 def clip_loss(text_embeddings, image_embeddings, temperature):
     """
     Compute the CLIP loss between image and text embeddings.
