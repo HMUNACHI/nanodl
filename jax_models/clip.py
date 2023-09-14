@@ -118,8 +118,8 @@ class Clip(nn.Module):
         image_latents, _ = self.image_encoder(images, training=training)
 
         # Flatten tensors
-        text_latents = jax.vmap(jnp.ravel)(text_latents)
-        image_latents = jax.vmap(jnp.ravel)(image_latents)
+        # text_latents = jax.vmap(jnp.ravel)(text_latents)
+        # image_latents = jax.vmap(jnp.ravel)(image_latents)
 
         # Project latents onto shared embedding space
         text_embedding = self.text_projection(text_latents)
