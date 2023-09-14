@@ -35,34 +35,14 @@ class Clip(nn.Module):
     - embed_text(texts): Embeds text data into the shared embedding space.
     - embed_image(images): Embeds image data into the shared embedding space.
 
-    Example:
-    key = jax.random.PRNGKey(0)
-    main_rng, init_rng, dropout_init_rng = jax.random.split(key, 3)
-    texts = jax.random.normal(jax.random.PRNGKey(10), (3, 16, 128))
-    images = jax.random.normal(jax.random.PRNGKey(20),(3,256,256,3))
-    patch_size = (16, 16)
-    input_dim = int((images.shape[1] * images.shape[2]) / (patch_size[0] * patch_size[1]))
+    
+    Note: 
+        Text input shape: (batch_size, max_length, embed_dim)
+        Image input shape: (batch_size, height, width, channels)
 
-    # Initialise model
-    clip = Clip(embed_dim = 256,
-                dropout = 0.2,
-                n_outputs = 256,
-                num_heads = 4,
-                feedforward_dim = 256,
-                num_layers_text = 2,
-                input_dim_text = 128,
-                image_patch_size = patch_size,
-                input_dim_image = input_dim,
-                num_layers_images = 2)
+        Image shape after patch embedding: (batch_size, sequence_length, embed_dim)
 
-    # Setup parameters
-    params = clip.init({'params': init_rng, 'dropout': dropout_init_rng},
-                        texts, 
-                        images,
-                        training=True)['params']
-
-    print('Number of parameters:', sum(x.size for x in jax.tree_leaves(params)))
-    main_rng, dropout_apply_rng = jax.random.split(main_rng)
+        This image sequence length can be calculated with (height * width) / (patch_height * patch_width)
     """
     embed_dim : int
     dropout: float
@@ -117,9 +97,9 @@ class Clip(nn.Module):
         text_latents, _ = self.text_encoder(texts, training=training)
         image_latents, _ = self.image_encoder(images, training=training)
 
-        # Flatten tensors
-        # text_latents = jax.vmap(jnp.ravel)(text_latents)
-        # image_latents = jax.vmap(jnp.ravel)(image_latents)
+        # Flatten arrays
+        text_latents = jax.vmap(jnp.ravel)(text_latents)
+        image_latents = jax.vmap(jnp.ravel)(image_latents)
 
         # Project latents onto shared embedding space
         text_embedding = self.text_projection(text_latents)
@@ -192,7 +172,7 @@ class Clip(nn.Module):
         return self.image_projection(self.image_encoder(images))
     
 
-@partial(jax.vmap, in_axes=(0, 0, None))
+@jax.jit
 def clip_loss(text_embeddings, image_embeddings, temperature):
     """
     Compute the CLIP loss between image and text embeddings.
@@ -312,6 +292,7 @@ def forward_pass(model,
     return params, opt_state, loss.mean(), rng
 
 
+# To Do: Complete distributed training
 @jax.jit
 def train_step(model,
                params,
@@ -325,11 +306,12 @@ def train_step(model,
                        in_axes=(None, None, None, None, 0, 0, None)
                        )(model,
                         params,
-                        optax_optimizer: optax.GradientTransformation,
-                        rng: jax.random.PRNGKey,
-                        text_embedding: jnp.ndarray,
-                        image_embedding: jnp.ndarray,
-                        opt_state=None)
+                        optax_optimizer,
+                        rng,
+                        text_embedding,
+                        image_embedding,
+                        opt_state)
+    
     return jax.tree_util.tree_map(lambda x: x.mean(axis=0), updates)
 
 
@@ -393,9 +375,9 @@ def train(config: dict,
         train_losses = []
         for text_batch, image_batch in train_loader:
             # Split batch across devices
-            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))
-            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0))
-            params, opt_state, train_loss, main_rng = train_step(clip, 
+            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))        # Remove if not distributing
+            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0))      # Remove if not distributing
+            params, opt_state, train_loss, main_rng = train_step(clip,                # Rplace train_step with forward if not distributing
                                                                 params,
                                                                 optax_optimizer,
                                                                 main_rng,
@@ -414,7 +396,7 @@ def train(config: dict,
             text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))   # Remove if not distributing
             image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0)) # Remove if not distributing
 
-            params, val_loss, main_rng = train_step(clip, 
+            params, val_loss, main_rng = train_step(clip,                        # Rplace train_step with forward if not distributing
                                                     params,
                                                     optax_optimizer,
                                                     main_rng,
