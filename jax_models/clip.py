@@ -125,7 +125,7 @@ class Clip(nn.Module):
         text_embedding = self.text_projection(text_latents)
         image_embedding = self.image_projection(image_latents)
 
-        return text_embedding, image_embedding, self.temperature
+        return text_embedding, image_embedding
 
     def get_attention_maps(self, texts, images):
         """
@@ -192,8 +192,7 @@ class Clip(nn.Module):
         return self.image_projection(self.image_encoder(images))
     
 
-@jax.value_and_grad
-@jax.jit
+@partial(jax.vmap, in_axes=(0, 0, None))
 def clip_loss(text_embeddings, image_embeddings, temperature):
     """
     Compute the CLIP loss between image and text embeddings.
@@ -257,6 +256,83 @@ def clip_loss(text_embeddings, image_embeddings, temperature):
     return loss.mean()
 
 
+@jax.jit
+def forward_pass(model,
+               params,
+               optax_optimizer: optax.GradientTransformation,
+               rng: jax.random.PRNGKey,
+               text_embedding: jnp.ndarray,
+               image_embedding: jnp.ndarray,
+               opt_state=None) -> tuple:
+    """
+    Perform a single training step for a contrastive learning model.
+
+    Args:
+        model (jax.lax.lax._jaxen.Model): The model to train.
+        params (jax.lax.lax._core.FrozenDict): The model's parameters.
+        optax_optimizer (optax.GradientTransformation): The optimizer.
+        rng (jax.random.PRNGKey): The random number generator key.
+        text_embedding (jax.interpreters.xla.DeviceArray): The text embedding.
+        image_embedding (jax.interpreters.xla.DeviceArray): The image embedding.
+        opt_state (optax.OptState, optional): The optimizer state. Default is None.
+
+    Returns:
+        tuple: A tuple containing updated parameters, updated optimizer state (if available),
+               loss, and a new random number generator key.
+    """
+    
+    # Split the random key into two for different uses
+    rng, dropout_apply_rng = jax.random.split(rng, 2)
+
+    # Apply the model to the text and image embeddings with dropout
+    text_embedding, image_embedding = model.apply(
+        {'params': params},
+        text_embedding,
+        image_embedding,
+        training=True,
+        rngs={'dropout': dropout_apply_rng}
+    )
+
+    # If there's no optimizer state, calculate the loss and return the updated parameters
+    if not opt_state:
+        loss, grads = clip_loss(text_embedding, image_embedding, model.temperature)
+        return params, loss.mean(), rng
+
+    # Calculate the loss and gradients with respect to the parameters
+    loss, grads = jax.value_and_grad(clip_loss)(
+        text_embedding,
+        image_embedding,
+        model.temperature
+    )
+
+    # Update the optimizer state and parameters using the gradients
+    updates, opt_state = optax_optimizer.update(grads, opt_state, params=params)
+    params = optax.apply_updates(params=params, updates=updates)
+
+    return params, opt_state, loss.mean(), rng
+
+
+@jax.jit
+def train_step(model,
+               params,
+               optax_optimizer: optax.GradientTransformation,
+               rng: jax.random.PRNGKey,
+               text_embedding: jnp.ndarray,
+               image_embedding: jnp.ndarray,
+               opt_state=None) -> tuple:
+    
+    updates = jax.pmap(forward_pass, 
+                       in_axes=(None, None, None, None, 0, 0, None)
+                       )(model,
+                        params,
+                        optax_optimizer: optax.GradientTransformation,
+                        rng: jax.random.PRNGKey,
+                        text_embedding: jnp.ndarray,
+                        image_embedding: jnp.ndarray,
+                        opt_state=None)
+    return jax.tree_util.tree_map(lambda x: x.mean(axis=0), updates)
+
+
 def train(config: dict, 
           optax_optimizer: optax.GradientTransformation, 
           train_loader, 
@@ -282,6 +358,7 @@ def train(config: dict,
     - None
     """
     # Create random keys
+    num_devices = jax.device_count() # Remove if not distributing
     key = jax.random.PRNGKey(0)
     main_rng, init_rng, dropout_init_rng = jax.random.split(key, 3)
     
@@ -307,36 +384,50 @@ def train(config: dict,
     
     # Create optimizer state
     opt_state = optax_optimizer.init(params)
-    main_rng, dropout_apply_rng = jax.random.split(main_rng)
+
+    # Replicate params across devices 
+    params = jax.pmap(lambda x: params)(jnp.arange(num_devices)) # Remove if not distributing
 
     for epoch in epochs:
+        
         train_losses = []
         for text_batch, image_batch in train_loader:
-            text_embedding, image_embedding, temperature = clip.apply({'params': params}, 
-                                                                        text_batch, 
-                                                                        image_batch, 
-                                                                        training=True, 
-                                                                        rngs={'dropout': dropout_apply_rng}
-                                                                        )
-            train_loss, grads = clip_loss(text_embedding, image_embedding, temperature)
-            updates, opt_state = optax_optimizer.update(grads, opt_state, params=params)
-            params =  optax.apply_updates(params=params, updates=updates)
-            train_losses.append(train_loss)
+            # Split batch across devices
+            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))
+            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0))
+            params, opt_state, train_loss, main_rng = train_step(clip, 
+                                                                params,
+                                                                optax_optimizer,
+                                                                main_rng,
+                                                                text_batch, 
+                                                                image_batch,
+                                                                opt_state=opt_state)
+            
+            # To Do: Aggregate forward_pass results from multiple devices 
+
+            train_losses.append(train_loss.mean())
             # ... do whatever with losses ...
 
         val_losses = []
         for text_batch, image_batch in val_loader:
-            text_embedding, image_embedding, temperature = clip.apply({'params': params}, 
-                                                                        text_batch, 
-                                                                        image_batch, 
-                                                                        training=True, 
-                                                                        rngs={'dropout': dropout_apply_rng}
-                                                                        )
-            val_loss, _ = clip_loss(text_embedding, image_embedding, temperature)
-            val_losses.append(val_loss)
+            # Split batch across devices
+            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))   # Remove if not distributing
+            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0)) # Remove if not distributing
+
+            params, val_loss, main_rng = train_step(clip, 
+                                                    params,
+                                                    optax_optimizer,
+                                                    main_rng,
+                                                    text_batch, 
+                                                    image_batch)
+            
+            # To Do: Aggregate forward_pass results from multiple devices 
+
+            val_losses.append(val_loss.mean())
             # ... do whatever with losses ...
 
         # Save every version of the model, can be modified to track and save best only
         pickle.dump(params, open(os.path.join(checkpoint_directory, str(epoch)), "wb"))
+
 
     return
