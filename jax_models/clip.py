@@ -1,3 +1,15 @@
+'''
+CLIP (Contrastive Language-Image Pretraining) is designed to understand and connect vision and language. 
+Its motivation arises from the need to bridge the gap between textual and visual information processing in AI. 
+CLIP's architecture is based on a vision-language transformer, 
+which is pretrained on a large corpus of text and images from the internet, 
+allowing it to learn associations between text and visuals. 
+Unlike traditional models that are pretrained on single-modal data, CLIP can perform a wide range of tasks, 
+including image classification, zero-shot object recognition, and even generating textual descriptions for images. 
+CLIP's versatility and performance stem from its ability to encode and compare text and image representations directly, 
+enabling it to generalize well across various vision and language tasks while minimizing the need for task-specific fine-tuning.
+'''
+
 import os
 import jax
 import optax

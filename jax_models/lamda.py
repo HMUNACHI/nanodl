@@ -1,14 +1,13 @@
 '''
-T5, which stands for Text-to-Text Transfer Transformer, is an influential deep learning architecture introduced by Google Research. 
-Its motivation stems from the idea of unifying various natural language processing tasks into a single framework to achieve greater model simplicity and efficiency. 
-T5 reimagines tasks as text-to-text problems, where both inputs and outputs are represented as text. 
-This consistent formulation allows T5 to perform an astonishingly wide range of tasks, 
-from translation and summarization to question-answering and document classification, by adjusting the input and output formats accordingly.
-The architecture is roughly equivalent to the original Transformer proposed by
-Vaswani et al. (2017) with the exception of removing the Layer Norm bias, placing the layer
-normalization outside the residual path, and using a different position embedding scheme.
+LaMBDA, which stands for "Language Model for Dialogue Applications," is a deep learning model developed by Google. 
+Its primary motivation lies in addressing the limitations of existing conversational AI models, such as GPT-3, 
+by explicitly targeting dialogue applications. LaMBDA's architecture is designed to excel in multi-turn conversations, 
+offering improvements in several key aspects. It incorporates features like context windowing, which enables it to remember and track information over longer dialogues, 
+and provides better control over generating detailed responses. LaMBDA also introduces a more controllable prompt engineering mechanism, 
+allowing users to instruct the model more precisely for various dialogue tasks. Overall, LaMBDA represents a significant step forward in the development of conversational AI models, 
+offering enhanced performance and usability in real-world dialogue applications.
 
-Note: The layer normalisation is left as is, the modification 
+Note: This is the architecture for LaMDA itself, the system is a lot more complex with not-so-much public detail.
 '''
 
 import jax
@@ -16,10 +15,21 @@ import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
 
+class LaMDA(nn.Module):
 
-class T5(nn.Module):
+    num_layers: int
+    input_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+    max_length: int
+    start_token: int
+    end_token: int
+
     """
-    Transformer-based Text-to-Text Transfer Transformer (T5) model for sequence generation.
+    Decoder-only model
 
     Args:
         num_layers (int): Number of layers in the encoder and decoder.
@@ -38,14 +48,6 @@ class T5(nn.Module):
         """
         Initialize the T5 model by setting up the encoder and decoder.
         """
-        self.encoder = Encoder(self.num_layers,
-                                self.input_dim,
-                                self.num_heads,
-                                self.feedforward_dim,
-                                self.dropout,
-                                self.vocab_size,
-                                self.embed_dim)
-        
         self.decoder = Decoder(self.num_layers,
                                 self.input_dim,
                                 self.num_heads,
@@ -53,11 +55,22 @@ class T5(nn.Module):
                                 self.dropout,
                                 self.vocab_size,
                                 self.embed_dim)
-
+        
     def __call__(self, 
+                 x: jnp.ndarray,
+                 training: bool = True) -> jnp.ndarray:
+        
+        """ 
+        Causal models are trained differently, the outputs are just the inputs shifted by 1
+        While the generation is autoregressve, hence a different function for that
+        """
+        return self.decoder(x=x, context=x, training=training)
+
+
+    def generate(self, 
                  x: jnp.ndarray, 
                  temperature: float = 1.0,
-                 training: bool = True) -> tuple:
+                 training: bool = True) -> jnp.ndarray:
         """
         Generate sequences using the T5 model.
 
@@ -69,9 +82,6 @@ class T5(nn.Module):
         Returns:
             tuple: A tuple containing the generated sequence.
         """
-        
-        # Encode the input sequence
-        encoded_sequence = self.encoder(x=x, training=training)
 
         # Initialize the decoding input with a special token
         decoder_input = jnp.array([[self.start_token]])
@@ -83,7 +93,7 @@ class T5(nn.Module):
         for _ in range(self.max_length):
             # Generate the next token
             decoder_output = self.decoder(x=decoder_input, 
-                                          context=encoded_sequence, 
+                                          context=x, 
                                           training=training) 
             
             # Apply temperature scaling to the logits
@@ -104,105 +114,8 @@ class T5(nn.Module):
             if next_token.item() == self.end_token:
                 break
 
-        return output_sequence, next_token_probabilities
-
-
-class Encoder(nn.Module):
-    """
-    Transformer Encoder.
-
-    Args:
-        num_layers (int): Number of encoder layers.
-        input_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
-    """
-    num_layers: int
-    input_dim: int
-    num_heads: int
-    feedforward_dim: int
-    dropout: float
-    vocab_size: float
-    embed_dim: float
-
-
-    def setup(self):
-        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
-                                  features=self.embed_dim)
-        
-        self.layers = [EncoderBlock(self.input_dim, 
-                                    self.num_heads, 
-                                    self.feedforward_dim, 
-                                    self.dropout)
-                       for _ in range(self.num_layers)]
-
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
-        """
-        Apply the TransformerEncoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and list of attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
-        attention_maps = []
-        x = self.embedding(x)
-        for layer in self.layers:
-            x, attention = layer(x, mask=mask, training=training)
-            attention_maps.append(attention)
-        return x, jnp.array(attention_maps)
+        return output_sequence
     
-
-class EncoderBlock(nn.Module):
-    """
-    Transformer Encoder Block.
-
-    Args:
-        input_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
-    """
-    input_dim: int
-    num_heads: int
-    feedforward_dim: int
-    dropout: float
-
-    def setup(self):
-        self.attention = RelativeMultiHeadAttention(hidden_dim=self.input_dim, 
-                                                    num_heads=self.num_heads)
-        self.linear = PositionWiseFFN(self.feedforward_dim, self.input_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
-
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
-        attended_x, attention = self.attention(x, x, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear(x)
-        x = self.add_norm1(x, linear_output, training)
-        return x, attention
 
 
 class Decoder(nn.Module):

@@ -1,3 +1,14 @@
+'''
+Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning. 
+The motivation behind Vision Transformers lies in the desire to extend the success of transformers, 
+originally designed for natural language processing, to visual data. These models aim to replace 
+or complement traditional Convolutional Neural Networks (CNNs) in image-related tasks. ViTs employ a self-attention mechanism 
+to capture global dependencies among pixels or patches of an image, which helps them understand context and relationships between different regions effectively. 
+By utilizing pretraining on large-scale image datasets, ViTs have achieved remarkable performance in image classification, object detection, image generation, and various other computer vision tasks. 
+Their modular design, scalability, and ability to handle both local and global information have made Vision Transformers a significant advancement in the field, 
+offering promising avenues for future research and applications in computer vision.
+'''
+
 import jax
 import jax.numpy as jnp
 import flax.linen as nn

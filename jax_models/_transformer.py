@@ -1,13 +1,15 @@
 '''
-Implementations of various attention mechanisms variants.
-While multiple concepts can be merged into a generalised module,
-Each technique is isolated for clarity and easy copy and paste
+Transformers are a groundbreaking class of deep learning models originally introduced in the paper "Attention Is All You Need" by Vaswani et al. 
+Their motivation stems from addressing limitations in previous sequence-to-sequence models and enabling more efficient and parallelizable training. 
+The key innovation of transformers is the self-attention mechanism, which allows the model to weigh the importance of different parts of the input sequence during processing. 
+This architecture has had a profound impact on natural language processing and has been adapted for a wide range of tasks, including machine translation, text generation, image captioning, and more. 
+Transformers have become the foundation for various state-of-the-art models, including BERT, GPT, and T5, which have achieved remarkable results across multiple domains, showcasing the power of attention-based architectures in deep learning.
 '''
 
+import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
-from _attention import SelfMultiHeadAttention, CrossMultiHeadAttention
 
 class PositionalEncoding(nn.Module):
     """
@@ -61,7 +63,136 @@ class TokenAndPositionEmbedding(nn.Module):
             return x + self.position_embeddings(jnp.arange(x.shape[1]))
         else:
             return x + self.position_embeddings(x)
+        
+
+
+class SelfMultiHeadAttention(nn.Module):
+    """
+    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
+    This involves transforming the input by weighting features by importance.
+    """
+    hidden_dim : int  # Output dimension
+    num_heads : int  # Number of parallel heads
+
+    def setup(self):
+        # Stack all weight matrices together for efficiency
+        self.projection = nn.Dense(3*self.hidden_dim,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros 
+                                )
+        self.output = nn.Dense(self.hidden_dim,
+                               kernel_init=nn.initializers.xavier_uniform(),
+                               bias_init=nn.initializers.zeros)
+
+
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
+
+        """
+        Args:
+            context: optional - context ((batch_size, seq_len, dims))
+            Mask: optional - masks where reqions to ignore are flipped to os
+                  regions to attend to are 1s (batch_size, seq_len, dims)
+
+        Return: outputs (batch_size, seq_len, seq_len)
+                attention matrixes (batch_size, heads, seq_len, seq_len)
+        """
+        projections = self.projection(inputs)
+        query, key, value = jnp.array_split(projections, 3, axis=-1)
+        context_vectors, attention = self.attention_function(query,key, value, mask=mask)
+        outputs = self.output(context_vectors)
+        return outputs, attention
     
+    def attention_function(self, query, key, value, mask=None):
+        input_length = query.shape[1]
+        context_length = key.shape[1]
+        head_dim = query.shape[-1] // self.num_heads
+        dim_key = key.shape[-1]
+
+        # Split queries, keys, and values into heads
+        query_heads = jnp.reshape(query, (query.shape[0], self.num_heads, input_length, head_dim))
+        key_heads = jnp.reshape(key, (key.shape[0], self.num_heads, context_length, head_dim))
+        value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
+
+        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
+        if mask is not None:
+            attention_scores = attention_scores * mask
+
+        attention_weights = jax.nn.softmax(attention_scores, axis=-1)
+        attended_values = jnp.matmul(attention_weights, value_heads)
+        attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
+        return attended_values, attention_weights
+
+
+class CrossMultiHeadAttention(nn.Module):
+    """
+    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
+    This involves transforming the input by weighting features by importance relative to a context
+    """
+    hidden_dim : int  # Output dimension
+    num_heads : int  # Number of parallel heads
+
+    def setup(self):
+        # Because the Query is determined from a context, project separately
+        self.query_projection = nn.Dense(self.hidden_dim,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros 
+                                )
+        self.key_projection = nn.Dense(self.hidden_dim,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros 
+                                )
+        self.value_projection = nn.Dense(self.hidden_dim,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros 
+                                )
+        self.output = nn.Dense(self.hidden_dim,
+                               kernel_init=nn.initializers.xavier_uniform(),
+                               bias_init=nn.initializers.zeros)
+
+
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 context: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
+
+        """
+        Args:
+            inputs: inputs ((batch_size, seq_len, dims))
+            context: optional - context ((batch_size, seq_len, dims))
+            Mask: optional - masks where reqions to ignore are flipped to os
+                  regions to attend to are 1s (batch_size, seq_len, dims)
+
+        Return: outputs (batch_size, seq_len, seq_len)
+                attention matrixes (batch_size, heads, seq_len, seq_len)
+        """
+        query = self.query_projection(inputs)
+        key = self.key_projection(context)
+        value = self.value_projection(context)
+        context_vectors, attention = self.attention_function(query,key, value, mask=mask)
+        outputs = self.output(context_vectors)
+        return outputs, attention
+    
+    def attention_function(self, query, key, value, mask=None):
+        input_length = query.shape[1]
+        context_length = key.shape[1]
+        head_dim = query.shape[-1] // self.num_heads
+        dim_key = key.shape[-1]
+
+        # Split queries, keys, and values into heads
+        query_heads = jnp.reshape(query, (query.shape[0], self.num_heads, input_length, head_dim))
+        key_heads = jnp.reshape(key, (key.shape[0], self.num_heads, context_length, head_dim))
+        value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
+
+        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
+        if mask is not None:
+            attention_scores = attention_scores * mask
+        
+        attention_weights = jax.nn.softmax(attention_scores, axis=-1)
+        attended_values = jnp.matmul(attention_weights, value_heads)
+        attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
+        return attended_values, attention_weights
 
 
 class PositionWiseFFN(nn.Module):
@@ -222,8 +353,17 @@ class TransformerEncoder(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
+    max_len : int
+    vocab_size : int
+    embed_dim : int
+    learned_position : bool
+
 
     def setup(self):
+        self.embedding = TokenAndPositionEmbedding(self.max_len,
+                                                   self.vocab_size,
+                                                   self.embed_dim,
+                                                   self.learned_position)
         self.layers = [EncoderBlock(self.input_dim, 
                                     self.num_heads, 
                                     self.feedforward_dim, 
@@ -247,6 +387,7 @@ class TransformerEncoder(nn.Module):
             each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
         """
         attention_maps = []
+        x = self.embedding(x)
         for layer in self.layers:
             x, attention = layer(x, mask=mask, training=training)
             attention_maps.append(attention)
@@ -349,8 +490,17 @@ class TransformerDecoder(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
+    max_len : int
+    vocab_size : int
+    embed_dim : int
+    learned_position : bool
+
 
     def setup(self):
+        self.embedding = TokenAndPositionEmbedding(self.max_len,
+                                                   self.vocab_size,
+                                                   self.embed_dim,
+                                                   self.learned_position)
         self.layers = [DecoderBlock(self.input_dim, 
                                     self.num_heads, 
                                     self.feedforward_dim, 
@@ -376,6 +526,7 @@ class TransformerDecoder(nn.Module):
         """
         attention_maps = []
         cross_attention_maps = []
+        x = self.embedding(x)
         for layer in self.layers:
             x, attention, cross_attention = layer(x, context, training=training)
             attention_maps.append(attention)

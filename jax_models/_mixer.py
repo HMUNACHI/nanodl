@@ -1,3 +1,11 @@
+'''
+MLP Mixers are a recent architectural innovation in the field of deep learning, introduced to address the limitations of traditional Convolutional Neural Networks (CNNs) and Transformers. 
+The motivation behind MLP Mixers arises from the need to handle diverse data types and leverage multi-modal information efficiently. Unlike transformers that rely on self-attention mechanisms, 
+MLP Mixers employ a simple yet powerful approach using Multi-Layer Perceptrons (MLPs) to process data. This architecture is designed to work with sequences, images, or even a combination of both, 
+making it versatile for a wide range of tasks. MLP Mixers have demonstrated strong performance in various applications, including image classification, natural language understanding, and cross-modal learning, 
+showcasing their potential in handling different modalities and promoting model efficiency and scalability in deep learning.
+'''
+
 from typing import Tuple
 import jax.numpy as jnp
 import flax.linen as nn
@@ -119,7 +127,7 @@ class MLPMixer(nn.Module):
         x = jax.random.normal(jax.random.PRNGKey(0), (1, 256, 256, 3) )
         params = model.init(rng, x)
         output = model.apply(params, x)
-        
+
     """
     num_blocks: int
     patch_size: Tuple[int, int]
