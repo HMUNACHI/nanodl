@@ -275,22 +275,7 @@ class RMSAddNorm(nn.Module):
         Returns:
             jnp.ndarray: Output tensor after applying RMSAddNorm.
         """
-        return self.rms_norm(nn.Dropout(self.dropout)(y, deterministic=not training) + x)
-    
-    def rms_norm(self, x: jnp.ndarray, axis=None, epsilon=1e-8) -> jnp.ndarray:
-        """
-        Apply RMS normalization to input tensor.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            axis: Axis along which to compute RMS normalization.
-            epsilon: Small value to avoid division by zero.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying RMS normalization.
-        """
-        rms = jnp.sqrt(jnp.mean(jnp.square(x), axis=axis, keepdims=True) + epsilon)
-        return x / rms
+        return nn.RMSNorm(nn.Dropout(self.dropout)(y, deterministic=not training) + x)
 
 
 class EncoderBlock(nn.Module):
@@ -311,7 +296,7 @@ class EncoderBlock(nn.Module):
     def setup(self):
         self.attention = SelfMultiHeadAttention(hidden_dim=self.input_dim, 
                                                 num_heads=self.num_heads)
-        self.linear = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.ff = PositionWiseFFN(self.feedforward_dim, self.input_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
 
@@ -332,8 +317,8 @@ class EncoderBlock(nn.Module):
         """
         attended_x, attention = self.attention(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear(x)
-        x = self.add_norm1(x, linear_output, training)
+        ff_output = self.ff(x)
+        x = self.add_norm2(x, ff_output, training)
         return x, attention
 
 
@@ -412,8 +397,7 @@ class DecoderBlock(nn.Module):
     def setup(self):
         self.attention1 = SelfMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
         self.attention2 = CrossMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.linear1 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
-        self.linear2 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.input_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
         self.add_norm3 = AddNorm(self.dropout)
@@ -463,14 +447,16 @@ class DecoderBlock(nn.Module):
             tuple: Output tensor, attention tensor, and cross-attention tensor.
         """
         mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
-        attended_x, attention1 = self.attention1(x, mask=mask)
+
+        attended_x, attention1 = self.attention1(x, x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
+
         attended_x, attention2 = self.attention2(x, context, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear1(x)
-        x = self.add_norm1(x, linear_output, training)
-        linear_output = self.linear2(x)
-        x = softmax(linear_output, axis=-1)
+        x = self.add_norm2(x, attended_x, training)
+
+        linear_output = self.feed_forward(x)
+        x = self.add_norm3(x, linear_output, training)
+        
         return x, jnp.array(attention1), jnp.array(attention2)
 
 
@@ -505,6 +491,8 @@ class TransformerDecoder(nn.Module):
                                     self.num_heads, 
                                     self.feedforward_dim, 
                                     self.dropout) for _ in range(self.num_layers)]
+        
+        self.outputs = nn.Dense(self.vocab_size)
 
     def __call__(self, 
                  x: jnp.ndarray, 
@@ -531,4 +519,4 @@ class TransformerDecoder(nn.Module):
             x, attention, cross_attention = layer(x, context, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
-        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
+        return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)

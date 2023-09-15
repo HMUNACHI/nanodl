@@ -149,7 +149,7 @@ class EncoderBlock(nn.Module):
     def setup(self):
         self.attention = SelfMultiHeadAttention(hidden_dim=self.input_dim, 
                                                 num_heads=self.num_heads)
-        self.linear = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.ff = PositionWiseFFN(self.feedforward_dim, self.input_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
 
@@ -170,8 +170,8 @@ class EncoderBlock(nn.Module):
         """
         attended_x, attention = self.attention(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear(x)
-        x = self.add_norm1(x, linear_output, training)
+        ff_output = self.ff(x)
+        x = self.add_norm2(x, ff_output, training)
         return x, attention
 
 

@@ -64,7 +64,8 @@ class LaMDA(nn.Module):
         Causal models are trained differently, the outputs are just the inputs shifted by 1
         While the generation is autoregressve, hence a different function for that
         """
-        return self.decoder(x=x, context=x, training=training)
+        x = self.decoder(x=x, context=x, training=training)
+        return jax.nn.softmax(x)
 
 
     def generate(self, 
@@ -172,7 +173,7 @@ class Decoder(nn.Module):
         x = self.embedding(x)
         cross_attention_maps = []
         for layer in self.layers:
-            x, attention, cross_attention = layer(x, context, training=training)
+            x, attention, cross_attention = layer(x, context, mask=mask, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
         return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)
@@ -196,8 +197,7 @@ class DecoderBlock(nn.Module):
     def setup(self):
         self.attention1 = RelativeMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
         self.attention2 = RelativeMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.linear1 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
-        self.linear2 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.input_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
         self.add_norm3 = AddNorm(self.dropout)
@@ -230,8 +230,7 @@ class DecoderBlock(nn.Module):
         return jnp.tile(mask, concatenator)
 
     def __call__(self, 
-                x: jnp.ndarray, 
-                context: jnp.ndarray, 
+                x: jnp.ndarray,
                 mask: jnp.ndarray = None, 
                 training: bool = True) -> tuple:
         """
@@ -246,15 +245,17 @@ class DecoderBlock(nn.Module):
         Returns:
             tuple: Output tensor, attention tensor, and cross-attention tensor.
         """
-        mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
+        mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
+
         attended_x, attention1 = self.attention1(x, x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
-        attended_x, attention2 = self.attention2(x, context, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear1(x)
-        x = self.add_norm1(x, linear_output, training)
-        linear_output = self.linear2(x)
-        x = softmax(linear_output, axis=-1)
+
+        attended_x, attention2 = self.attention2(x, x, mask=mask)
+        x = self.add_norm2(x, attended_x, training)
+
+        linear_output = self.feed_forward(x)
+        x = self.add_norm3(x, linear_output, training)
+
         return x, jnp.array(attention1), jnp.array(attention2)
     
 

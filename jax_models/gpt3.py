@@ -4,6 +4,7 @@ Its architecture is a decoder-only transformer trained on next-token prediction 
 It's pre-trained on a massive amount of text data, which allows it to learn the patterns and nuances of language. 
 GPT's strength lies in its ability to generalize this knowledge to perform a wide range of natural language processing tasks without the need for extensive task-specific training, 
 making it a powerful tool for various applications in language understanding and generation.
+GPT3 uses prelayer normalisation opposed to classic transformers
 '''
 
 import jax
@@ -11,7 +12,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 from jax.nn import softmax
 
-class GPT(nn.Module):
+class GPT3(nn.Module):
 
     num_layers: int
     input_dim: int
@@ -52,6 +53,7 @@ class GPT(nn.Module):
                                 self.vocab_size,
                                 self.embed_dim)
         
+        
     def __call__(self, 
                  x: jnp.ndarray,
                  training: bool = True) -> jnp.ndarray:
@@ -60,7 +62,8 @@ class GPT(nn.Module):
         Causal models are trained differently, the outputs are just the inputs shifted by 1
         While the generation is autoregressve, hence a different function for that
         """
-        return self.decoder(x=x, context=x, training=training)
+        x = self.decoder(x=x, context=x, training=training)
+        return jax.nn.softmax(x)
 
 
     def generate(self, 
@@ -168,7 +171,7 @@ class GPTDecoder(nn.Module):
         x = self.embedding(x)
         cross_attention_maps = []
         for layer in self.layers:
-            x, attention, cross_attention = layer(x, context, training=training)
+            x, attention, cross_attention = layer(x, context, mask=mask, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
         return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)
@@ -190,13 +193,15 @@ class GPTBlock(nn.Module):
     dropout: float
 
     def setup(self):
-        self.attention1 = CrossMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.attention2 = CrossMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.linear1 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
-        self.linear2 = PositionWiseFFN(self.feedforward_dim, self.input_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
-        self.add_norm3 = AddNorm(self.dropout)
+        self.attention1 = SelfMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
+        self.attention2 = SelfMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
+        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.norm1 = nn.LayerNorm(self.dropout)
+        self.norm2 = nn.LayerNorm(self.dropout)
+        self.norm3 = nn.LayerNorm(self.dropout)
+        self.dropout1 = nn.Dropout(self.dropout)
+        self.dropout2 = nn.Dropout(self.dropout)
+        self.dropout3 = nn.Dropout(self.dropout)
 
     def causal_mask(self, 
                     batch_size: int, 
@@ -227,7 +232,6 @@ class GPTBlock(nn.Module):
 
     def __call__(self, 
                 x: jnp.ndarray, 
-                context: jnp.ndarray, 
                 mask: jnp.ndarray = None, 
                 training: bool = True) -> tuple:
         """
@@ -242,37 +246,37 @@ class GPTBlock(nn.Module):
         Returns:
             tuple: Output tensor, attention tensor, and cross-attention tensor.
         """
-        mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
-        attended_x, attention1 = self.attention1(x, x, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        attended_x, attention2 = self.attention2(x, context, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear1(x)
-        x = self.add_norm1(x, linear_output, training)
-        linear_output = self.linear2(x)
-        x = softmax(linear_output, axis=-1)
+        mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
+
+        x = self.norm1(x)
+        attended_x, attention1 = self.attention1(x, mask=mask)
+        x = self.dropout1(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm2(x)
+        attended_x, attention2 = self.attention2(x, mask=mask)
+        x = self.dropout2(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm3(x)
+        output = self.feed_forward(x)
+        x = self.dropout3(output, deterministic=not training)
+        x += attended_x
+
         return x, jnp.array(attention1), jnp.array(attention2)
     
 
-class CrossMultiHeadAttention(nn.Module):
+class SelfMultiHeadAttention(nn.Module):
     """
     https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
-    This involves transforming the input by weighting features by importance relative to a context
+    This involves transforming the input by weighting features by importance.
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
 
     def setup(self):
-        # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
-        self.key_projection = nn.Dense(self.hidden_dim,
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        # Stack all weight matrices together for efficiency
+        self.projection = nn.Dense(3*self.hidden_dim,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
@@ -283,12 +287,10 @@ class CrossMultiHeadAttention(nn.Module):
 
     def __call__(self, 
                  inputs: jnp.ndarray, 
-                 context: jnp.ndarray, 
                  mask: jnp.ndarray = None) -> tuple:
 
         """
         Args:
-            inputs: inputs ((batch_size, seq_len, dims))
             context: optional - context ((batch_size, seq_len, dims))
             Mask: optional - masks where reqions to ignore are flipped to os
                   regions to attend to are 1s (batch_size, seq_len, dims)
@@ -296,9 +298,8 @@ class CrossMultiHeadAttention(nn.Module):
         Return: outputs (batch_size, seq_len, seq_len)
                 attention matrixes (batch_size, heads, seq_len, seq_len)
         """
-        query = self.query_projection(inputs)
-        key = self.key_projection(context)
-        value = self.value_projection(context)
+        projections = self.projection(inputs)
+        query, key, value = jnp.array_split(projections, 3, axis=-1)
         context_vectors, attention = self.attention_function(query,key, value, mask=mask)
         outputs = self.output(context_vectors)
         return outputs, attention
@@ -317,7 +318,7 @@ class CrossMultiHeadAttention(nn.Module):
         attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
         if mask is not None:
             attention_scores = attention_scores * mask
-        
+
         attention_weights = jax.nn.softmax(attention_scores, axis=-1)
         attended_values = jnp.matmul(attention_weights, value_heads)
         attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
@@ -351,35 +352,6 @@ class PositionWiseFFN(nn.Module):
             jnp.ndarray: Output tensor after applying the feed-forward network.
         """
         return self.dense2(self.activation(self.dense1(X)))
-    
-
-class AddNorm(nn.Module):
-    """
-    Residual connection followed by layer normalization.
-
-    Args:
-        dropout (float): Dropout rate for the residual connection.
-    """
-    dropout: int
-
-    @nn.compact
-    def __call__(self, 
-                 X: jnp.ndarray, 
-                 Y: jnp.ndarray, 
-                 training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
-        return nn.LayerNorm()(
-            nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
     
 
 class GEGLU(nn.Module):
