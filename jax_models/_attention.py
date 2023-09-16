@@ -48,7 +48,7 @@ class SelfMultiHeadAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -78,19 +78,19 @@ class CrossMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.output = nn.Dense(self.hidden_dim,
+        self.output = nn.Dense(self.hidden_dim*self.num_heads,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
 
@@ -118,7 +118,7 @@ class CrossMultiHeadAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -153,15 +153,15 @@ class MultiQueryAttention(nn.Module):
         # To ensure dimensions are compatible
         assert self.hidden_dim % self.num_heads <= 0
 
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim//self.num_heads,
+        self.key_projection = nn.Dense(self.hidden_dim,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim//self.num_heads,
+        self.value_projection = nn.Dense(self.hidden_dim,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
@@ -195,7 +195,7 @@ class MultiQueryAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -225,15 +225,15 @@ class RelativeMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
@@ -279,7 +279,7 @@ class RelativeMultiHeadAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -413,19 +413,19 @@ class RotaryMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.rope = RotaryPositionalEncoding(self.hidden_dim)
+        self.rope = RotaryPositionalEncoding(self.hidden_dim*self.num_heads)
         self.output = nn.Dense(self.hidden_dim,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
@@ -456,7 +456,7 @@ class RotaryMultiHeadAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -489,15 +489,15 @@ class GatedMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
@@ -531,7 +531,7 @@ class GatedMultiHeadAttention(nn.Module):
         return outputs, attention
     
     def attention_function(self, query, key, value,mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -574,35 +574,35 @@ class HierarchicalMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.word_query_projection = nn.Dense(self.hidden_dim,
+        self.word_query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.word_key_projection = nn.Dense(self.hidden_dim,
+        self.word_key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.word_value_projection = nn.Dense(self.hidden_dim,
+        self.word_value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.word_output = nn.Dense(self.hidden_dim,
+        self.word_output = nn.Dense(self.hidden_dim*self.num_heads,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros
                                )
-        self.sentence_query_projection = nn.Dense(self.hidden_dim,
+        self.sentence_query_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.sentence_key_projection = nn.Dense(self.hidden_dim,
+        self.sentence_key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.sentence_value_projection = nn.Dense(self.hidden_dim,
+        self.sentence_value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.sentence_output = nn.Dense(self.hidden_dim,
+        self.sentence_output = nn.Dense(self.hidden_dim*self.num_heads,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
 
@@ -652,7 +652,7 @@ class HierarchicalMultiHeadAttention(nn.Module):
         return word_outputs, sentence_outputs, word_attention, sentence_attention
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
@@ -684,19 +684,19 @@ class LocalMultiHeadAttention(nn.Module):
 
     def setup(self):
         # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim*self.num_headsm,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.key_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim*self.num_heads,
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.output = nn.Dense(self.hidden_dim,
+        self.output = nn.Dense(self.hidden_dim*self.num_heads,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
 
@@ -738,7 +738,7 @@ class LocalMultiHeadAttention(nn.Module):
         return mask
     
     def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
+        input_length = value.shape[1]
         context_length = key.shape[1]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
