@@ -25,6 +25,4 @@ secrets.yaml
 /user-settings.json
 
 # ignore specific files
-test.py
-/vision/
-/trainer/
+/archive/

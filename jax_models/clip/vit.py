@@ -9,11 +9,9 @@ Their modular design, scalability, and ability to handle both local and global i
 offering promising avenues for future research and applications in computer vision.
 '''
 
-import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from typing import Tuple
-from _attention import SelfMultiHeadAttention
 
 class PatchEmbedding(nn.Module):
     """
@@ -74,6 +72,45 @@ class PatchEmbedding(nn.Module):
         patches = jnp.reshape(patches, (batch_size, -1, ph * pw * c))
         return patches
 
+
+class SelfMultiHeadAttention(nn.Module):
+    """
+    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
+    This involves transforming the input by weighting features by importance.
+    """
+    hidden_dim : int  # Output dimension
+    num_heads : int  # Number of parallel heads
+
+    def setup(self):
+        # Stack all weight matrices together for efficiency
+        self.projection = nn.Dense(3*self.hidden_dim,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros 
+                                )
+        self.output = nn.Dense(self.hidden_dim,
+                               kernel_init=nn.initializers.xavier_uniform(),
+                               bias_init=nn.initializers.zeros)
+
+
+    def __call__(self, 
+                 inputs: jnp.ndarray, 
+                 mask: jnp.ndarray = None) -> tuple:
+
+        """
+        Args:
+            context: optional - context ((batch_size, seq_len, dims))
+            Mask: optional - masks where reqions to ignore are flipped to os
+                  regions to attend to are 1s (batch_size, seq_len, dims)
+
+        Return: outputs (batch_size, seq_len, seq_len)
+                attention matrixes (batch_size, heads, seq_len, seq_len)
+        """
+        projections = self.projection(inputs)
+        query, key, value = jnp.array_split(projections, 3, axis=-1)
+        context_vectors, attention = self.attention_function(query,key, value, mask=mask)
+        outputs = self.output(context_vectors)
+        return outputs, attention
+    
 
 class PositionWiseFFN(nn.Module):
     """

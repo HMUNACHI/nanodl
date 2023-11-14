@@ -17,8 +17,8 @@ import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 
-from _vit import ViT
-from _transformer import TransformerEncoder
+from vit import ViT
+from transformer import TransformerEncoder
 from typing import Tuple
 from functools import partial
 
