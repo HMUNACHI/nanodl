@@ -87,8 +87,8 @@ class Clip(nn.Module):
             dropout=self.dropout,
             n_outputs=self.n_outputs,
         )
-        self.text_projection = nn.Dense(self.embed_dim)
-        self.image_projection = nn.Dense(self.embed_dim)
+        self.text_pooler = nn.Dense(self.embed_dim)
+        self.image_pooler = nn.Dense(self.embed_dim)
         self.temperature = self.param('temperature', nn.initializers.zeros, ())
 
     def __call__(self, texts, images, training):
@@ -108,14 +108,8 @@ class Clip(nn.Module):
         # Get encoded representations
         text_latents, _ = self.text_encoder(texts, training=training)
         image_latents, _ = self.image_encoder(images, training=training)
-
-        # Flatten arrays
-        text_latents = jax.vmap(jnp.ravel)(text_latents)
-        image_latents = jax.vmap(jnp.ravel)(image_latents)
-
-        # Project latents onto shared embedding space
-        text_embedding = self.text_projection(text_latents)
-        image_embedding = self.image_projection(image_latents)
+        text_embedding = self.text_pooler(jnp.mean(text_latents, axis=1))
+        image_embedding = self.image_pooler(jnp.mean(image_latents, axis=1))
 
         return text_embedding, image_embedding
 
@@ -169,7 +163,7 @@ class Clip(nn.Module):
         Returns:
         - text_embedding (jax.numpy.ndarray): Embedded text representation.
         """
-        return self.text_projection(self.text_encoder(texts))
+        return self.text_pooler(self.text_encoder(texts))
 
     def embed_image(self, images):
         """
@@ -181,7 +175,7 @@ class Clip(nn.Module):
         Returns:
         - image_embedding (jax.numpy.ndarray): Embedded image representation.
         """
-        return self.image_projection(self.image_encoder(images))
+        return self.image_pooler(self.image_encoder(images))
     
 
 @jax.jit
@@ -214,38 +208,17 @@ def clip_loss(text_embeddings, image_embeddings, temperature):
     def l2_normalise(x):
         return x / jnp.linalg.norm(x, axis=-1, keepdims=True)
 
-    def cross_entropy(preds, targets, reduction='none'):
-        log_softmax = jax.nn.log_softmax
-        loss = (-targets * log_softmax(preds)).sum(axis=1)
-        if reduction == "none":
-            return loss
-        elif reduction == "mean":
-            return loss.mean()
-
-    # L2 normalize both image and text embeddings
+    def cross_entropy(preds, targets):
+        return (-targets * jax.nn.log_softmax(preds)).sum(axis=1).mean()
+    
     text_embeddings = l2_normalise(text_embeddings)
     image_embeddings = l2_normalise(image_embeddings)
-    
-    # Calculate logits
-    logits = (jnp.dot(text_embeddings, image_embeddings.T)) / temperature
+    similarity_matrix = image_embeddings @ text_embeddings.T / temperature
+    labels = jnp.arange(similarity_matrix.shape[0])
+    image_loss = cross_entropy(similarity_matrix, labels)
+    text_loss = cross_entropy(similarity_matrix.T, labels)
 
-    # Calculate image and text similarity matrices
-    images_similarity = jnp.dot(image_embeddings, image_embeddings.T)
-    texts_similarity = jnp.dot(text_embeddings, text_embeddings.T)
-
-    # Calculate the target distribution as the softmax of the average similarity matrix
-    targets = jax.nn.softmax(
-        (images_similarity + texts_similarity) / 2 * temperature, axis=-1
-    )
-
-    # Calculate cross-entropy loss for both images and texts
-    texts_loss = cross_entropy(logits, targets, reduction='none')
-    images_loss = cross_entropy(jnp.transpose(logits), jnp.transpose(targets), reduction='none')
-
-    # Compute the final loss as the average of both losses
-    loss = (images_loss + texts_loss) / 2.0 
-
-    return loss.mean()
+    return (image_loss + text_loss) / 2
 
 
 @jax.jit
@@ -302,126 +275,3 @@ def forward_pass(model,
     params = optax.apply_updates(params=params, updates=updates)
 
     return params, opt_state, loss.mean(), rng
-
-
-# To Do: Complete distributed training
-@jax.jit
-def train_step(model,
-               params,
-               optax_optimizer: optax.GradientTransformation,
-               rng: jax.random.PRNGKey,
-               text_embedding: jnp.ndarray,
-               image_embedding: jnp.ndarray,
-               opt_state=None) -> tuple:
-    
-    updates = jax.pmap(forward_pass, 
-                       in_axes=(None, None, None, None, 0, 0, None)
-                       )(model,
-                        params,
-                        optax_optimizer,
-                        rng,
-                        text_embedding,
-                        image_embedding,
-                        opt_state)
-    
-    return jax.tree_util.tree_map(lambda x: x.mean(axis=0), updates)
-
-
-def train(config: dict, 
-          optax_optimizer: optax.GradientTransformation, 
-          train_loader, 
-          val_loader, 
-          text_shape: tuple, 
-          image_shape: tuple,
-          checkpoint_directory: str,
-          epochs: int):
-    """
-    Train a CLIP model using the specified parameters and data loaders.
-
-    Args:
-    - model_params (dict): Parameters for initializing the CLIP model.
-    - optax_optimizer (optax.GradientTransformation): Optimizer for model training.
-    - train_loader (DataLoader): DataLoader for training data.
-    - val_loader (DataLoader): DataLoader for validation data.
-    - text_shape (tuple): Shape of the text input (e.g., (batch_size, sequence_length)).
-    - image_shape (tuple): Shape of the image input (e.g., (batch_size, height, width, channels)).
-    - checkpoint_directory (str): Directory to save model checkpoints.
-    - epochs (int): Number of training epochs.
-
-    Returns:
-    - None
-    """
-    # Create random keys
-    num_devices = jax.device_count() # Remove if not distributing
-    key = jax.random.PRNGKey(0)
-    main_rng, init_rng, dropout_init_rng = jax.random.split(key, 3)
-    
-    # Initialise model
-    clip = Clip(embed_dim = config['embed_dim'],
-                dropout = config['dropout'],
-                n_outputs = config['n_outputs'],
-                num_heads = config['num_heads'],
-                feedforward_dim = config['feedforward_dim'],
-                num_layers_text = config['num_layers_text'],
-                input_dim_text = config['input_dim_text'],
-                image_patch_size = config['image_patch_size'],
-                input_dim_image = config['input_dim_image'],
-                num_layers_images = config['num_layers_images'])
-
-    # Setup parameters
-    params = clip.init({'params': init_rng, 'dropout': dropout_init_rng},
-                       jnp.ones(text_shape), 
-                       jnp.ones(image_shape),
-                       training=True)['params']
-    
-    print('Number of parameters:', sum(x.size for x in jax.tree_leaves(params)))
-    
-    # Create optimizer state
-    opt_state = optax_optimizer.init(params)
-
-    # Replicate params across devices 
-    params = jax.pmap(lambda x: params)(jnp.arange(num_devices)) # Remove if not distributing
-
-    for epoch in epochs:
-        
-        train_losses = []
-        for text_batch, image_batch in train_loader:
-            # Split batch across devices
-            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))        # Remove if not distributing
-            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0))      # Remove if not distributing
-            params, opt_state, train_loss, main_rng = train_step(clip,                # Rplace train_step with forward if not distributing
-                                                                params,
-                                                                optax_optimizer,
-                                                                main_rng,
-                                                                text_batch, 
-                                                                image_batch,
-                                                                opt_state=opt_state)
-            
-            # To Do: Aggregate forward_pass results from multiple devices 
-
-            train_losses.append(train_loss.mean())
-            # ... do whatever with losses ...
-
-        val_losses = []
-        for text_batch, image_batch in val_loader:
-            # Split batch across devices
-            text_batch = jnp.array(jnp.split(text_batch, num_devices, axis=0))   # Remove if not distributing
-            image_batch = jnp.array(jnp.split(image_batch, num_devices, axis=0)) # Remove if not distributing
-
-            params, val_loss, main_rng = train_step(clip,                        # Rplace train_step with forward if not distributing
-                                                    params,
-                                                    optax_optimizer,
-                                                    main_rng,
-                                                    text_batch, 
-                                                    image_batch)
-            
-            # To Do: Aggregate forward_pass results from multiple devices 
-
-            val_losses.append(val_loss.mean())
-            # ... do whatever with losses ...
-
-        # Save every version of the model, can be modified to track and save best only
-        pickle.dump(params, open(os.path.join(checkpoint_directory, str(epoch)), "wb"))
-
-
-    return
