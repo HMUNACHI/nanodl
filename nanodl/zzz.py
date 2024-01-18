@@ -1,4 +1,4 @@
-from swin import *
+from mixer import *
 
 # Dummy data parameters
 batch_size = 8
@@ -24,7 +24,7 @@ hyperparams = {
 }
 
 # Initialize model
-model = Swin(**hyperparams)
+model = Mixer(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 params = model.init(rngs, dummy_inputs)['params']
 outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
@@ -32,6 +32,6 @@ print(outputs.shape)
 
 # Training on your data
 dataloader = [(dummy_inputs, dummy_labels)] * 10
-trainer = SwinDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer = MixerDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
