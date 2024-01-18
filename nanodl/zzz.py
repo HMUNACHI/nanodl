@@ -1,40 +1,37 @@
-from gpt import *
-from lamda import *
+from swin import *
 
 # Dummy data parameters
 batch_size = 8
-max_length = 51
-vocab_size = 1000 
-embed_dim = 256 
+max_length = 50 
+n_outputs = 5  
+embed_dim = 256  
+patch_size = (16, 16)  
 
 # Generate dummy text and image data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
+dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
+key = jax.random.PRNGKey(10)
+dummy_labels = jax.random.randint(key, shape=(batch_size,), minval=0, maxval=n_outputs-1)
 
-# CLIP model parameters
+# model parameters
 hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
+    "dropout": 0.1,
+    "num_heads": 2,
+    "feedforward_dim": embed_dim,
+    "patch_size": patch_size,
+    "hidden_dim": embed_dim,
+    "num_layers": 4,
+    "n_outputs": n_outputs
 }
 
-# Initialize CLIP model
-model = LaMDA(**hyperparams)
+# Initialize model
+model = Swin(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
 print(outputs.shape)
 
 # Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+dataloader = [(dummy_inputs, dummy_labels)] * 10
+trainer = SwinDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))

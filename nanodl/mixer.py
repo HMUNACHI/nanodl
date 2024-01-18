@@ -4,6 +4,47 @@ The motivation behind MLP Mixers arises from the need to handle diverse data typ
 MLP Mixers employ a simple yet powerful approach using Multi-Layer Perceptrons (MLPs) to process data. This architecture is designed to work with sequences, images, or even a combination of both, 
 making it versatile for a wide range of tasks. MLP Mixers have demonstrated strong performance in various applications, including image classification, natural language understanding, and cross-modal learning, 
 showcasing their potential in handling different modalities and promoting model efficiency and scalability in deep learning.
+
+Example usage:
+```
+from Mixer import *
+
+# Dummy data parameters
+batch_size = 8
+max_length = 50 
+n_outputs = 5  
+embed_dim = 256  
+patch_size = (16, 16)  
+
+# Generate dummy text and image data
+dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
+key = jax.random.PRNGKey(10)
+dummy_labels = jax.random.randint(key, shape=(batch_size,), minval=0, maxval=n_outputs-1)
+
+# model parameters
+hyperparams = {
+    "dropout": 0.1,
+    "num_heads": 2,
+    "feedforward_dim": embed_dim,
+    "patch_size": patch_size,
+    "hidden_dim": embed_dim,
+    "num_layers": 4,
+    "n_outputs": n_outputs
+}
+
+# Initialize model
+model = Mixer(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs)['params']
+outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
+print(outputs.shape)
+
+# Training on your data
+dataloader = [(dummy_inputs, dummy_labels)] * 10
+trainer = MixerDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+```
 '''
 
 import jax
@@ -82,8 +123,6 @@ class MixerBlock(nn.Module):
     Args:
         dim (int): The dimensionality of the block's hidden layers.
     """
-    dim: int
-
     @nn.compact
     def __call__(self, x):
         """
@@ -97,63 +136,309 @@ class MixerBlock(nn.Module):
         """
         # Create a skip connection
         skip = x.copy()
-        
-        # Layer Normalization
         x = nn.LayerNorm()(x)
-        
-        # Transpose for processing across sequence_length
         x = jnp.transpose(x, axes=(0, 2, 1))
-        
-        # Fully connected layer with GELU activation
-        x =  nn.gelu(nn.Dense(self.dim))(x)
-        
-        # Transpose back to the original shape and add the skip connection
+        x =  nn.gelu(nn.Dense(x.shape[-1])(x))
         x = jnp.transpose(x, axes=(0, 2, 1)) + skip
         skip = x.copy()
-        
-        # Layer Normalization
         x = nn.LayerNorm()(x)
-        
-        # Fully connected layer with GELU activation & skip
-        return nn.gelu(nn.Dense(self.dim))(x) + skip
+        return nn.gelu(nn.Dense(x.shape[-1])(x)) + skip
 
 
-class MLPMixer(nn.Module):
+class MixerEncoder(nn.Module):
     """
-    Implements the MLP-Mixer architecture.
+    MLPMixer model for image encoding.
 
     Args:
-        num_blocks (int): Number of MixerBlocks to stack.
-        patch_size (Tuple[int, int]): Size of image patches.
-        embed_dim (int): Dimensionality of the patch embeddings.
+    patch_size (tuple): Size of the patches (height, width).
+    num_layers (int): Number of transformer encoder layers.
+    hidden_dim(int): Input dimension for the transformer encoder.
+    num_heads (int): Number of attention heads in the transformer encoder.
+    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
+    dropout (float): Dropout probability for regularization.
 
-    Example Usage:
-        model = MLPMixer(num_blocks=1, patch_size=(16,16), embed_dim=256)
-        x = jax.random.normal(jax.random.PRNGKey(0), (1, 256, 256, 3) )
-        params = model.init(rng, x)
-        output = model.apply(params, x)
-
+    Note: The transformer MLP blocks were designed to have a bottleneck
+          As such, the embeddining dim and feedforward dim should be the same to 
     """
-    num_blocks: int
-    patch_size: Tuple[int, int]
-    embed_dim: int 
 
-    @nn.compact
-    def __call__(self, x):
+    patch_size: Tuple[int, int]
+    num_layers: int
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+
+    def setup(self):
         """
-        Applies the MLP-Mixer to an input tensor.
+        Setup the Mixer model architecture by initializing its components.
+        Initializes the embedding layer, transformer encoder blocks, and the output layer.
+        """
+        self.embedding = PatchEmbedding(self.patch_size, 
+                                        self.feedforward_dim)
+        
+        self.layers = [MixerBlock()
+                       for _ in range(self.num_layers)]
+        
+        self.dropout_layer = nn.Dropout(self.dropout)
+
+    def __call__(self, 
+                 x: jnp.ndarray,
+                 training: bool = False) -> tuple:
+        """
+        Apply the Mixer model to input data.
+        Args:
+        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
+        Returns:
+        jax.numpy.ndarray: Predicted class scores for each input sample.
+        jax.numpy.ndarray: Attention maps from the transformer encoder.
+        """
+        x = self.embedding(x)
+        for layer in self.layers:
+            x = layer(x)
+            self.dropout_layer(x, deterministic=not training)
+        return x
+
+
+class Mixer(nn.Module):
+    """
+    Vision Transformer (Mixer) model for image classification.
+
+    Args:
+    patch_size (tuple): Size of the patches (height, width).
+    num_layers (int): Number of transformer encoder layers.
+    hidden_dim (int): Input dimension for the transformer encoder.
+    num_heads (int): Number of attention heads in the transformer encoder.
+    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
+    dropout (float): Dropout probability for regularization.
+    n_outputs (int): Number of output classes.
+
+    Note: The transformer MLP blocks were designed to have a bottleneck
+          As such, the embeddining dim and feedforward dim should be the same to 
+    """
+
+    patch_size: Tuple[int, int]
+    num_layers: int
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+    n_outputs: int
+
+    def setup(self):
+        """
+        Setup the Mixer model architecture by initializing its components.
+
+        Initializes the embedding layer, transformer encoder blocks, and the output layer.
+        """
+        self.encoder = MixerEncoder(
+            patch_size=self.patch_size,
+            num_layers=self.num_layers,
+            hidden_dim=self.hidden_dim,
+            num_heads=self.num_heads,
+            feedforward_dim=self.feedforward_dim,
+            dropout=self.dropout
+        )
+        self.dropout_layer = nn.Dropout(self.dropout)
+        self.output = nn.Dense(self.n_outputs)
+
+    def __call__(self, 
+                 x: jnp.ndarray, 
+                 training: bool = False) -> tuple:
+        """
+        Apply the Mixer model to input data.
 
         Args:
-            x (jax.numpy.ndarray): Input tensor of shape (batch_size, sequence_length, embed_dim).
+        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
 
         Returns:
-            jax.numpy.ndarray: Output tensor of the same shape as the input.
+        jax.numpy.ndarray: Predicted class scores for each input sample.
+        jax.numpy.ndarray: Attention maps from the transformer encoder.
         """
-        # Apply PatchEmbedding (assuming it's defined elsewhere)
-        x = PatchEmbedding(self.patch_size, self.embed_dim)(x)
-        
-        # Apply multiple MixerBlocks
-        for _ in range(self.num_blocks):
-            x = MixerBlock(x.shape[-1])(x)
+        x = self.encoder(x=x, training=training)
+        x = self.dropout_layer(x, deterministic=not training)
 
-        return x
+        # perform cls pooling and return logits
+        return self.output(x[:,0,:]), x
+
+
+class MixerDataParallelTrainer:
+    """
+    A class for training a GPT model using data parallelism.
+
+    Attributes:
+        model: The GPT model to be trained.
+        num_parameters: The number of parameters in the model.
+        best_val_loss: The best validation loss achieved during training.
+        weights_filename: Filename for saving the model weights.
+        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
+        state: The current state of the model, including parameters and optimizer state.
+    """
+    def __init__(self, 
+                 model: Any, 
+                 input_shape: Tuple[int, ...],
+                 weights_filename: str,
+                 learning_rate: float = 1e-5,
+                 params_path: Optional[str] = None) -> None:
+        self.model = model
+        self.params_path = params_path
+        self.num_parameters = None
+        self.best_val_loss = float("inf")
+        self.weights_filename = weights_filename
+        self.num_devices = jax.local_device_count()
+        self.train_step = jax.pmap(MixerDataParallelTrainer.train_step, axis_name='devices')
+        self.evaluation_step = jax.pmap(MixerDataParallelTrainer.evaluation_step, axis_name='devices')
+        self.state = self.create_train_state(learning_rate, input_shape)
+        print(f'Number of accelerators: {self.num_devices}')
+    
+
+    def create_train_state(self, 
+                           learning_rate: float, 
+                           input_shape: Tuple[int, ...]) -> Any:
+        """
+        Creates and initializes the training state for the model.
+
+        Args:
+            learning_rate: The learning rate for the optimizer.
+            text_input_shape: The shape of the text input.
+            image_input_shape: The shape of the image input.
+
+        Returns:
+            The initialized training state.
+        """
+        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+        params = self.model.init(rngs, jnp.ones(input_shape))['params']
+
+        if self.params_path is not None:
+            params = self.load_params(self.params_path)
+
+        self.num_parameters = sum(param.size for param in jax.tree_util.tree_leaves(params))
+        print(f'Number of parameters: {self.num_parameters}')
+        state = train_state.TrainState.create(apply_fn=self.model.apply, 
+                                              params=params, 
+                                              tx=optax.adam(learning_rate))
+        return jax.device_put_replicated(state, jax.local_devices())
+    
+    @staticmethod
+    def train_step(state: Any, 
+                   inputs: jnp.ndarray,
+                   targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+        """
+        Performs a single training step.
+
+        Args:
+            state: The current state of the model, including parameters and optimizer state.
+            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
+
+        Returns:
+            A tuple of the updated state and the loss value for this step.
+        """
+        def loss_fn(params):
+            logits = state.apply_fn({'params': params}, 
+                                    inputs, 
+                                    training=True,
+                                    rngs={'dropout': jax.random.PRNGKey(int(time.time()))})[0]
+            return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
+        
+        loss, grads = jax.value_and_grad(loss_fn)(state.params)
+        state = state.apply_gradients(grads=grads)
+        return state, loss
+
+    def train(self, 
+              train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
+              num_epochs: int, 
+              val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
+        """
+        Trains the model for a specified number of epochs.
+
+        Args:
+            train_loader: An iterable of training data batches.
+            num_epochs: The number of epochs to train for.
+            val_loader: An optional iterable of validation data batches.
+        """
+        for epoch in range(num_epochs):
+            total_loss = 0.0
+            count = 0
+            for inputs, targets in train_loader:
+                batch_size = inputs.shape[0]
+                batch_size_per_device = batch_size // self.num_devices
+                inputs = inputs.reshape((self.num_devices, batch_size_per_device, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
+                targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
+                self.state, loss = self.train_step(state=self.state, 
+                                                   inputs=inputs, 
+                                                   targets=targets)
+                total_loss += jnp.mean(loss)
+                count += 1
+            
+            mean_loss = total_loss / count
+            print(f'Epoch {epoch+1}, Train Loss: {mean_loss}')
+
+            if val_loader is not None:
+                val_loss = self.evaluate(val_loader)
+                print(f'Epoch {epoch+1}, Val Loss: {val_loss}')
+                if val_loss < self.best_val_loss:
+                    self.best_val_loss = val_loss
+                print("New best validation score achieved, saving model...")
+                self.save_params()
+        return 
+    
+    @staticmethod
+    def evaluation_step(state: Any, 
+                        inputs: jnp.ndarray,
+                        targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+        """
+        Performs a single training step.
+
+        Args:
+            state: The current state of the model, including parameters and optimizer state.
+            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
+
+        Returns:
+            A tuple of the updated state and the loss value for this step.
+        """
+        logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})[0]
+        return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
+
+    def evaluate(self, 
+                 test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
+        """
+        evaluates the model using the provided validation loader.
+
+        Args:
+            val_loader: An iterable of validation data batches.
+            epoch: The current epoch number.
+            num_epochs: The total number of epochs.
+        """
+        total_loss = 0.0
+        count = 0
+        for inputs, targets in test_loader:
+            batch_size = inputs.shape[0]
+            batch_size_per_device = batch_size // self.num_devices
+            inputs = inputs.reshape((self.num_devices, batch_size_per_device, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
+            targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
+            loss = self.evaluation_step(self.state, inputs, targets)
+            total_loss += jnp.mean(loss)
+            count += 1
+        
+        mean_loss = total_loss / count
+        return mean_loss
+
+    def save_params(self) -> None:
+        """
+        Saves the model parameters to a file.
+        """
+        with open(self.weights_filename, 'wb') as f:
+            pickle.dump(self.state.params, f)
+
+    def load_params(self, filename: str) -> Any:
+        """
+        Loads the model parameters from a file.
+
+        Args:
+            filename: The filename of the file containing the parameters.
+
+        Returns:
+            The loaded parameters.
+        """
+        with open(filename, 'rb') as f:
+            params = pickle.load(f)
+        return params

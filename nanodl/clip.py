@@ -231,7 +231,6 @@ class AddNorm(nn.Module):
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
 
 
-
 class EncoderBlock(nn.Module):
     """
     Transformer Encoder Block.
@@ -257,7 +256,7 @@ class EncoderBlock(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
+                 training: bool = False) -> tuple:
         """
         Apply the EncoderBlock to input data.
 
@@ -312,7 +311,7 @@ class TextEncoder(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
+                 training: bool = False) -> tuple:
         """
         Apply the TransformerEncoder to input data.
 
@@ -433,7 +432,7 @@ class ImageEncoder(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
+                 training: bool = False) -> tuple:
         """
         Apply the ViT model to input data.
         Args:

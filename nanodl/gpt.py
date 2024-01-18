@@ -6,6 +6,12 @@ GPT's strength lies in its ability to generalize this knowledge to perform a wid
 making it a powerful tool for various applications in language understanding and generation.
 GPT3 uses prelayer normalisation opposed to classic transformers
 
+Note:
+This implementation excludes the modified initialization which accounts for the accumulation on the residual path with model depth. 
+Such an intialisation involves scaling the weights of residual layers at initialization by a factor of 1/√N where N is the number of residual layers. 
+Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10a.html) for the weights and 'zeros' for the biases.
+
+
 example usage:
 ```
 from gpt import *
@@ -21,7 +27,7 @@ data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size,
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
 
-# CLIP model parameters
+# model parameters
 hyperparams = {
     'num_layers': 1,
     'hidden_dim': 256,
@@ -35,7 +41,7 @@ hyperparams = {
     'end_token': 50,
 }
 
-# Initialize CLIP model
+# Initialize model
 model = GPT3(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 params = model.init(rngs, dummy_inputs)['params']

@@ -7,7 +7,52 @@ and provides better control over generating detailed responses. LaMBDA also intr
 allowing users to instruct the model more precisely for various dialogue tasks. Overall, LaMBDA represents a significant step forward in the development of conversational AI models, 
 offering enhanced performance and usability in real-world dialogue applications.
 
-Note: This is the architecture for LaMDA itself, the system is a lot more complex with not-so-much public detail.
+Note: 
+This is the architecture for LaMDA itself for now, the system is a lot more complex. At inference, LaMDA makes use of a single model to perform multiple tasks.
+it generates potential responses, which are then filtered for safety, grounded on an external knowledge source, and re-ranked to find the highest-quality response.
+
+Example Usage:
+```
+from lamda import *
+
+# Dummy data parameters
+batch_size = 8
+max_length = 51
+vocab_size = 1000 
+embed_dim = 256 
+
+# Generate dummy text and image data
+data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+dummy_inputs = data[:, :-1]
+dummy_targets = data[:, 1:]
+
+# model parameters
+hyperparams = {
+    'num_layers': 1,
+    'hidden_dim': 256,
+    'num_heads': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.1,
+    'vocab_size': 1000,
+    'embed_dim': 256,
+    'max_length': max_length,
+    'start_token': 0,
+    'end_token': 50,
+}
+
+# Initialize model
+model = LaMDA(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs)['params']
+outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+print(outputs.shape)
+
+# Training on your data
+dataloader = [(dummy_inputs, dummy_targets)] * 10
+trainer = LaMDADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+```
 '''
 
 import jax
@@ -113,7 +158,7 @@ class PositionWiseFFN(nn.Module):
 
     def setup(self):
         self.dense1 = nn.Dense(self.num_hiddens, kernel_init=nn.initializers.xavier_uniform())
-        self.activation = GEGLU()
+        self.activation = GEGLU(self.num_hiddens)
         self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
@@ -179,33 +224,33 @@ class GEGLU(nn.Module):
         return x * 0.5 * gate * (1 + tanh_res)
     
 
-class DecoderBlock(nn.Module):
+class LaMDABlock(nn.Module):
     """
     Transformer Decoder Block.
 
     Args:
-        input_dim (int): Input dimension.
+        hidden_dim (int): Input dimension.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
     """
-    input_dim: int
+    hidden_dim: int
     num_heads: int
     feedforward_dim: int
     dropout: float
 
     def setup(self):
-        self.attention1 = RelativeMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.attention2 = RelativeMultiHeadAttention(hidden_dim=self.input_dim, num_heads=self.num_heads)
-        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.input_dim)
+        self.attention1 = RelativeMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.attention2 = RelativeMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
         self.add_norm3 = AddNorm(self.dropout)
 
     def causal_mask(self, 
-                    batch_size: int, 
-                    destination_dim: int, 
-                    source_dim: int) -> jnp.ndarray:
+                batch_size: int, 
+                destination_dim: int, 
+                source_dim: int) -> jnp.ndarray:
         """
         Generate a causal mask for self-attention.
 
@@ -222,17 +267,15 @@ class DecoderBlock(nn.Module):
         idx_destination = jnp.arange(source_dim)
         mask = idx_source >= idx_destination - source_dim + destination_dim
         mask = mask.astype(jnp.int32) 
-        mask = mask.reshape((1, destination_dim, source_dim))
-        concatenator = jnp.concatenate([jnp.array([batch_size]), 
-                                        jnp.array([self.num_heads]), 
-                                        jnp.array([1, 1], dtype=jnp.int32)], 0)
 
-        return jnp.tile(mask, concatenator)
+        # Expand dimensions to match the required output shape
+        mask = mask[None, None, :, :]
+        return jnp.broadcast_to(mask, (batch_size, self.num_heads, destination_dim, source_dim))
 
     def __call__(self, 
                 x: jnp.ndarray,
                 mask: jnp.ndarray = None, 
-                training: bool = True) -> tuple:
+                training: bool = False) -> tuple:
         """
         Apply the DecoderBlock to input data.
 
@@ -259,19 +302,19 @@ class DecoderBlock(nn.Module):
         return x, jnp.array(attention1), jnp.array(attention2)
     
 
-class Decoder(nn.Module):
+class LaMDADecoder(nn.Module):
     """
     Transformer Decoder.
 
     Args:
         num_layers (int): Number of decoder layers.
-        input_dim (int): Input dimension.
+        hidden_dim (int): Input dimension.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
     """
     num_layers: int
-    input_dim: int
+    hidden_dim: int
     num_heads: int
     feedforward_dim: int
     dropout: float
@@ -283,7 +326,7 @@ class Decoder(nn.Module):
         self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
                                   features=self.embed_dim)
         
-        self.layers = [DecoderBlock(self.input_dim, 
+        self.layers = [LaMDABlock(self.hidden_dim, 
                                     self.num_heads, 
                                     self.feedforward_dim, 
                                     self.dropout) for _ in range(self.num_layers)]
@@ -292,16 +335,14 @@ class Decoder(nn.Module):
         
 
     def __call__(self, 
-                 x: jnp.ndarray, 
-                 context: jnp.ndarray, 
+                 x: jnp.ndarray,
                  mask: jnp.ndarray = None, 
-                 training: bool = True) -> tuple:
+                 training: bool = False) -> tuple:
         """
         Apply the TransformerDecoder to input data.
 
         Args:
             x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
             mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
             training (bool): Training mode.
 
@@ -313,30 +354,19 @@ class Decoder(nn.Module):
         x = self.embedding(x)
         cross_attention_maps = []
         for layer in self.layers:
-            x, attention, cross_attention = layer(x, context, mask=mask, training=training)
+            x, attention, cross_attention = layer(x, mask=mask, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
         return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)
     
 
 class LaMDA(nn.Module):
-
-    num_layers: int
-    num_heads: int
-    feedforward_dim: int
-    dropout: float
-    vocab_size: float
-    embed_dim: float
-    max_length: int
-    start_token: int
-    end_token: int
-
     """
     Decoder-only model
 
     Args:
         num_layers (int): Number of layers in the encoder and decoder.
-        input_dim (int): Dimensionality of input embeddings.
+        hidden_dim (int): Dimensionality of input embeddings.
         num_heads (int): Number of attention heads in the multi-head attention layers.
         feedforward_dim (int): Dimensionality of the feedforward layers.
         dropout (float): Dropout probability.
@@ -346,37 +376,52 @@ class LaMDA(nn.Module):
         start_token (int): Token ID for the start of sequence.
         end_token (int): Token ID for the end of sequence.
     """
+    num_layers: int
+    num_heads: int
+    hidden_dim: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+    max_length: int
+    start_token: int
+    end_token: int
 
     def setup(self):
         """
         Initialize the T5 model by setting up the encoder and decoder.
         """
-        self.decoder = Decoder(self.num_layers,
-                                self.input_dim,
-                                self.num_heads,
-                                self.feedforward_dim,
-                                self.dropout,
-                                self.vocab_size,
-                                self.embed_dim)
+        self.decoder = LaMDADecoder(self.num_layers,
+                                    self.hidden_dim,
+                                    self.num_heads,
+                                    self.feedforward_dim,
+                                    self.dropout,
+                                    self.vocab_size,
+                                    self.embed_dim)
         
     def __call__(self, 
                  x: jnp.ndarray,
-                 training: bool = True) -> jnp.ndarray:
+                 training: bool = False) -> jnp.ndarray:
         
         """ 
         Causal models are trained differently, the outputs are just the inputs shifted by 1
         While the generation is autoregressve, hence a different function for that
         """
-        x = self.decoder(x=x, context=x, training=training)
-        return jax.nn.softmax(x)
+        return self.decoder(x=x, training=training)[0]
 
 
     def generate(self, 
-                 x: jnp.ndarray, 
+                 x: Optional[jnp.ndarray] = None, 
                  temperature: float = 1.0,
-                 training: bool = True) -> jnp.ndarray:
+                 training: bool = False) -> jnp.ndarray:
         """
-        Generate sequences using the T5 model.
+        Generate sequences either from scratch or continues from the input sequence. 
+
+        Note:
+        At inference, LaMDA makes use of a single model to perform multiple tasks.
+        it generates potential responses, which are then filtered for safety, 
+        grounded on an external knowledge source, and re-ranked to find the highest-quality response.
+        This is only an implementation of the generation part of the model.
 
         Args:
             x (jax.numpy.ndarray): Input sequence.
@@ -388,34 +433,203 @@ class LaMDA(nn.Module):
         """
 
         # Initialize the decoding input with a special token
-        decoder_input = jnp.array([[self.start_token]])
-
-        # Initialize the output sequence
+        decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
 
         # Autoregressive decoding loop
         for _ in range(self.max_length):
-            # Generate the next token
-            decoder_output = self.decoder(x=decoder_input, 
-                                          context=x, 
+            decoder_output = self.decoder(x=decoder_input,
                                           training=training) 
             
-            # Apply temperature scaling to the logits
             scaled_logits = decoder_output / temperature
-
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
-            
-            # Sample the next token from the distribution
             next_token = jax.random.categorical(jax.random.PRNGKey(0), next_token_probabilities, 1)[0]
-
-            # Append the generated token to the output sequence
             output_sequence.append(next_token.item())
-
-            # Use the generated token as the input for the next step
             decoder_input = jnp.expand_dims(next_token, axis=1)
-
-            # Check if the end token is generated
             if next_token.item() == self.end_token:
                 break
 
         return output_sequence
+    
+
+class LaMDADataParallelTrainer:
+    """
+    A class for training a GPT model using data parallelism.
+
+    Attributes:
+        model: The GPT model to be trained.
+        num_parameters: The number of parameters in the model.
+        best_val_loss: The best validation loss achieved during training.
+        weights_filename: Filename for saving the model weights.
+        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
+        state: The current state of the model, including parameters and optimizer state.
+    """
+    def __init__(self, 
+                 model: Any, 
+                 input_shape: Tuple[int, ...],
+                 weights_filename: str,
+                 learning_rate: float = 1e-5,
+                 params_path: Optional[str] = None) -> None:
+        self.model = model
+        self.params_path = params_path
+        self.num_parameters = None
+        self.best_val_loss = float("inf")
+        self.weights_filename = weights_filename
+        self.num_devices = jax.local_device_count()
+        self.train_step = jax.pmap(LaMDADataParallelTrainer.train_step, axis_name='devices')
+        self.evaluation_step = jax.pmap(LaMDADataParallelTrainer.evaluation_step, axis_name='devices')
+        self.state = self.create_train_state(learning_rate, input_shape)
+        print(f'Number of accelerators: {self.num_devices}')
+    
+
+    def create_train_state(self, 
+                           learning_rate: float, 
+                           input_shape: Tuple[int, ...]) -> Any:
+        """
+        Creates and initializes the training state for the model.
+
+        Args:
+            learning_rate: The learning rate for the optimizer.
+            text_input_shape: The shape of the text input.
+            image_input_shape: The shape of the image input.
+
+        Returns:
+            The initialized training state.
+        """
+        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+        params = self.model.init(rngs, jnp.ones(input_shape, dtype=jnp.int32))['params']
+
+        if self.params_path is not None:
+            params = self.load_params(self.params_path)
+
+        self.num_parameters = sum(param.size for param in jax.tree_util.tree_leaves(params))
+        print(f'Number of parameters: {self.num_parameters}')
+        state = train_state.TrainState.create(apply_fn=self.model.apply, 
+                                              params=params, 
+                                              tx=optax.adam(learning_rate))
+        return jax.device_put_replicated(state, jax.local_devices())
+    
+    @staticmethod
+    def train_step(state: Any, 
+                   inputs: jnp.ndarray,
+                   targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+        """
+        Performs a single training step.
+
+        Args:
+            state: The current state of the model, including parameters and optimizer state.
+            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
+
+        Returns:
+            A tuple of the updated state and the loss value for this step.
+        """
+        def loss_fn(params):
+            logits = state.apply_fn({'params': params}, 
+                                    inputs, 
+                                    training=True,
+                                    rngs={'dropout': jax.random.PRNGKey(int(time.time()))})
+            return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
+        
+        loss, grads = jax.value_and_grad(loss_fn)(state.params)
+        state = state.apply_gradients(grads=grads)
+        return state, loss
+
+    def train(self, 
+              train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
+              num_epochs: int, 
+              val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
+        """
+        Trains the model for a specified number of epochs.
+
+        Args:
+            train_loader: An iterable of training data batches.
+            num_epochs: The number of epochs to train for.
+            val_loader: An optional iterable of validation data batches.
+        """
+        for epoch in range(num_epochs):
+            total_loss = 0.0
+            count = 0
+            for inputs, targets in train_loader:
+                batch_size = inputs.shape[0]
+                batch_size_per_device = batch_size // self.num_devices
+                inputs = inputs.reshape((self.num_devices, batch_size_per_device, -1))
+                targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
+                self.state, loss = self.train_step(state=self.state, 
+                                                   inputs=inputs, 
+                                                   targets=targets)
+                total_loss += jnp.mean(loss)
+                count += 1
+            
+            mean_loss = total_loss / count
+            print(f'Epoch {epoch+1}, Train Loss: {mean_loss}')
+
+            if val_loader is not None:
+                val_loss = self.evaluate(val_loader)
+                print(f'Epoch {epoch+1}, Val Loss: {val_loss}')
+                if val_loss < self.best_val_loss:
+                    self.best_val_loss = val_loss
+                print("New best validation score achieved, saving model...")
+                self.save_params()
+        return 
+    
+    @staticmethod
+    def evaluation_step(state: Any, 
+                        inputs: jnp.ndarray,
+                        targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+        """
+        Performs a single training step.
+
+        Args:
+            state: The current state of the model, including parameters and optimizer state.
+            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
+
+        Returns:
+            A tuple of the updated state and the loss value for this step.
+        """
+        logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})
+        return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
+
+    def evaluate(self, 
+                 test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
+        """
+        evaluates the model using the provided validation loader.
+
+        Args:
+            val_loader: An iterable of validation data batches.
+            epoch: The current epoch number.
+            num_epochs: The total number of epochs.
+        """
+        total_loss = 0.0
+        count = 0
+        for inputs, targets in test_loader:
+            batch_size = inputs.shape[0]
+            batch_size_per_device = batch_size // self.num_devices
+            inputs = inputs.reshape((self.num_devices, batch_size_per_device, -1))
+            targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
+            loss = self.evaluation_step(self.state, inputs, targets)
+            total_loss += jnp.mean(loss)
+            count += 1
+        
+        mean_loss = total_loss / count
+        return mean_loss
+
+    def save_params(self) -> None:
+        """
+        Saves the model parameters to a file.
+        """
+        with open(self.weights_filename, 'wb') as f:
+            pickle.dump(self.state.params, f)
+
+    def load_params(self, filename: str) -> Any:
+        """
+        Loads the model parameters from a file.
+
+        Args:
+            filename: The filename of the file containing the parameters.
+
+        Returns:
+            The loaded parameters.
+        """
+        with open(filename, 'rb') as f:
+            params = pickle.load(f)
+        return params
