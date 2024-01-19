@@ -19,7 +19,7 @@ n_outputs = 5
 embed_dim = 256  
 patch_size = (16, 16)  
 
-# Generate dummy text and image data
+# Generate data
 dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
 key = jax.random.PRNGKey(10)
 dummy_labels = jax.random.randint(key, shape=(batch_size,), minval=0, maxval=n_outputs-1)

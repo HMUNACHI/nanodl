@@ -18,7 +18,7 @@ max_length = 51
 vocab_size = 1000 
 embed_dim = 256 
 
-# Generate dummy text and image data
+# Generate data
 data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
