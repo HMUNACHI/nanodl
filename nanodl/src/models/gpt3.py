@@ -373,8 +373,8 @@ class GPT3(nn.Module):
 
     def generate(self, 
                  x: Optional[jnp.ndarray] = None, 
-                 temperature: float = 1.0,
-                 training: bool = False) -> jnp.ndarray:
+                 params: Optional[Any] = None,
+                 temperature: float = 1.0) -> jnp.ndarray:
         """
         Generate sequences either from scratch or continues from the input sequence.
 
@@ -393,9 +393,7 @@ class GPT3(nn.Module):
 
         # Autoregressive decoding loop
         for _ in range(self.max_length):
-            decoder_output = self.decoder(x=decoder_input,
-                                          training=training) 
-            
+            decoder_output = self.apply(params, decoder_input, training=False) 
             scaled_logits = decoder_output / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
             next_token = jax.random.categorical(jax.random.PRNGKey(0), next_token_probabilities, 1)[0]
@@ -588,3 +586,36 @@ class GPT3DataParallelTrainer:
         with open(filename, 'rb') as f:
             params = pickle.load(f)
         return params
+    
+
+# Dummy data parameters
+batch_size = 8
+max_length = 51
+vocab_size = 1000 
+embed_dim = 256 
+
+# Generate dummy data
+data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+dummy_inputs = data[:, :-1]
+dummy_targets = data[:, 1:]
+
+# model parameters
+hyperparams = {
+    'num_layers': 1,
+    'hidden_dim': 256,
+    'num_heads': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.1,
+    'vocab_size': 1000,
+    'embed_dim': 256,
+    'max_length': max_length,
+    'start_token': 0,
+    'end_token': 50,
+}
+
+# Initialize model
+model = GPT3(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs)['params']
+outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+print(outputs.shape)
