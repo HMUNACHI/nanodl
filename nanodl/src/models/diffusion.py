@@ -17,7 +17,10 @@ pred_noises, pred_images = diffusion_model.apply(params, images)
 print(pred_noises.shape, pred_images.shape)
 
 image_generator = DiffusionImageGenerator(diffusion_model, params)
-generated_images = image_generator.generate(num_images=5, diffusion_steps=5)
+generated_images = diffusion_model.apply(params, 
+                                         num_images=5, 
+                                         diffusion_steps=5, 
+                                         method=diffusion_model.generate)
 print(generated_images.shape)
 
 # Training on your data
@@ -328,21 +331,6 @@ class DiffusionModel(nn.Module):
 
         return pred_images
     
-
-class DiffusionImageGenerator:
-    def __init__(self, 
-                 diffusion_model: DiffusionModel, 
-                 params: Any):
-        """
-        Initializes the DiffusionImageGenerator with a diffusion model and its parameters.
-
-        Args:
-            diffusion_model (DiffusionModel): An instance of the DiffusionModel.
-            params (Any): The parameters (weights) of the DiffusionModel.
-        """
-        self.diffusion_model = diffusion_model
-        self.params = params
-
     def generate(self, 
                  num_images: int = 1, 
                  diffusion_steps: int = 20) -> jnp.ndarray:
@@ -358,13 +346,11 @@ class DiffusionImageGenerator:
         """
         key = jax.random.PRNGKey(int(time.time()))
         noises = jax.random.normal(key, shape=(num_images, 
-                                               self.diffusion_model.image_size, 
-                                               self.diffusion_model.image_size, 
+                                               self.image_size, 
+                                               self.image_size, 
                                                3))
-        return self.diffusion_model.apply(self.params, 
-                                          noises, 
-                                          diffusion_steps, 
-                                          method=self.diffusion_model.reverse_diffusion)
+        
+        return self.reverse_diffusion(noises, diffusion_steps)
 
 
 class DiffusionDataParallelTrainer:
