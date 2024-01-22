@@ -43,6 +43,17 @@ dataloader = [(dummy_inputs, dummy_targets)] * 10
 trainer = GPT4DataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, num_epochs=2)
 print(trainer.evaluate(dataloader))
+
+# Generate: should always have dims (batch_size, seq_len)
+start_tokens = jnp.array([[123, 456], [145, 656]])
+
+params = trainer.load_params('params.pkl')
+outputs = model.apply({'params': params},
+                      start_tokens, 
+                      rngs={'dropout': jax.random.PRNGKey(2)}, 
+                      method=model.generate)
+
+print(outputs)
 ```
 '''
 
@@ -431,37 +442,85 @@ class GPT4(nn.Module):
     def generate(self, 
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
-                 training: bool = False) -> jnp.ndarray:
+                 deterministic: bool = False) -> Tuple[jnp.ndarray]:
         """
         Generate sequences either from scratch or continues from the input sequence.
 
         Args:
-            x (jax.numpy.ndarray): Input sequence.
+            x (jax.numpy.ndarray, optional): Input sequence.
             temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            training (bool, optional): Whether the model is in training mode.
+            seed (int, optional): Random seed for reproducibility.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
 
         Returns:
-            tuple: A tuple containing the generated sequence.
+            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
         """
 
-        # Initialize the decoding input with a special token
         decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
 
         # Autoregressive decoding loop
         for _ in range(self.max_length):
-            decoder_output = self.decoder(x=decoder_input,
-                                          training=training) 
-            
-            scaled_logits = decoder_output / temperature
+            decoder_output = self.decoder(decoder_input, training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
-            next_token = jax.random.categorical(jax.random.PRNGKey(0), next_token_probabilities, 1)[0]
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                next_token = jax.random.categorical(jax.random.PRNGKey(int(time.time())), next_token_probabilities, axis=-1)
+
+            next_token = next_token[0]
             output_sequence.append(next_token.item())
-            decoder_input = jnp.expand_dims(next_token, axis=1)
+            print(decoder_input.shape, jnp.array([[next_token]]).shape)
+            decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
+
             if next_token.item() == self.end_token:
                 break
 
-        return output_sequence
+        return tuple(output_sequence)
+    
+
+    def generate_batch(self, 
+                 x: Optional[jnp.ndarray] = None,
+                 temperature: float = 1.0,
+                 deterministic: bool = False) -> jnp.ndarray:
+        """
+        Generate sequences either from scratch or continues from the input sequence in batch.
+
+        Args:
+            x (jax.numpy.ndarray, optional): Batch of input sequences.
+            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
+
+        Returns:
+            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
+        """
+
+        batch_size = x.shape[0] if x is not None else 1
+        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
+
+        for i in range(self.max_length):
+            decoder_output = self.decoder(decoder_input, training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
+            next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                key = jax.random.PRNGKey(int(time.time()))
+                next_token = jax.random.categorical(key, next_token_probabilities, axis=-1)
+
+            output_sequences = output_sequences.at[:, i].set(next_token)
+            decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
+
+            if jnp.all(next_token == self.end_token):
+                break
+
+        return output_sequences
     
 
 class GPT4DataParallelTrainer:
@@ -632,7 +691,8 @@ class GPT4DataParallelTrainer:
         with open(self.weights_filename, 'wb') as f:
             pickle.dump(self.state.params, f)
 
-    def load_params(self, filename: str) -> Any:
+    @staticmethod
+    def load_params(filename: str) -> Any:
         """
         Loads the model parameters from a file.
 
