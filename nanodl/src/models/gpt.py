@@ -1,10 +1,20 @@
 '''
-Details of GPT4 are unknown, this is an implementation based on rumours about the implementation details of GPT-4, 
-and as such is not expected to be spot on. Please create a discussion if you have more information or feelings about the implementation details.
+The motivation behind GPT is to create a highly effective language model that can understand and generate human-like text. 
+Its architecture is a decoder-only transformer trained on next-token prediction and generates autoregressively duting training.
+It's pre-trained on a massive amount of text data, which allows it to learn the patterns and nuances of language. 
+GPT's strength lies in its ability to generalize this knowledge to perform a wide range of natural language processing tasks without the need for extensive task-specific training, 
+making it a powerful tool for various applications in language understanding and generation.
+GPT3 uses prelayer normalisation opposed to classic transformers
+
+Note:
+This implementation excludes the modified initialization which accounts for the accumulation on the residual path with model depth. 
+Such an intialisation involves scaling the weights of residual layers at initialization by a factor of 1/√N where N is the number of residual layers. 
+Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10a.html) for the weights and 'zeros' for the biases.
+
 
 example usage:
 ```
-from gpt4 import *
+from gpt import GPT4, GPTDataParallelTrainer
 
 # Dummy data parameters
 batch_size = 8
@@ -40,16 +50,15 @@ print(outputs.shape)
 
 # Training on your data
 dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = GPT4DataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, num_epochs=2)
 print(trainer.evaluate(dataloader))
 
 # Generate: should always have dims (batch_size, seq_len)
-start_tokens = jnp.array([[123, 456], [145, 656]])
+start_tokens = jnp.array([[123, 456]])
 
-params = trainer.load_params('params.pkl')
+# params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
-                      start_tokens, 
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
                       method=model.generate)
 
@@ -126,6 +135,34 @@ class SelfMultiHeadAttention(nn.Module):
         return attended_values, attention_weights
     
 
+class PositionWiseFFN(nn.Module):
+    """
+    Position-wise Feed-Forward Network.
+
+    Args:
+        num_hiddens (int): Number of hidden units in the feed-forward layers.
+        num_outputs (int): Number of output units in the feed-forward layers.
+    """
+    num_hiddens: int
+    num_outputs: int
+
+    def setup(self):
+        self.dense1 = nn.Dense(self.num_hiddens, kernel_init=nn.initializers.xavier_uniform())
+        self.activation = GEGLU(self.num_hiddens)
+        self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
+
+    def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
+        """
+        Apply the PositionWiseFFN to input data.
+
+        Args:
+            X (jnp.ndarray): Input tensor.
+
+        Returns:
+            jnp.ndarray: Output tensor after applying the feed-forward network.
+        """
+        return self.dense2(self.activation(self.dense1(X)))
+
 
 class GEGLU(nn.Module):
     """
@@ -148,30 +185,337 @@ class GEGLU(nn.Module):
         return x * 0.5 * gate * (1 + tanh_res)
     
 
-class MixtureOfExperts(nn.Module):
+class GPT3Block(nn.Module):
     """
-    Mixture of Experts Layer.
-
-    This layer consists of multiple expert feed-forward networks and a gating mechanism
-    to determine the contribution of each expert based on the input.
-
-    Attributes:
-        num_experts (int): Number of experts in the mixture.
-        num_hiddens (int): Number of hidden units in each expert.
-        num_outputs (int): Number of output units in the final layer after combining expert outputs.
+    Transformer Decoder Block.
 
     Args:
-        num_experts (int): Number of experts.
-        num_hiddens (int): Number of hidden units in each expert network.
-        num_outputs (int): Number of output units in the final layer.
+        hidden_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
     """
-    num_experts: int
-    num_hiddens: int
-    num_outputs: int
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
 
     def setup(self):
-        self.experts = [nn.Dense(self.num_hiddens, 
-                                kernel_init=nn.initializers.xavier_uniform()) for _ in range(self.num_experts)
+        self.attention1 = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.attention2 = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
+        self.norm1 = nn.LayerNorm(self.dropout)
+        self.norm2 = nn.LayerNorm(self.dropout)
+        self.norm3 = nn.LayerNorm(self.dropout)
+        self.dropout1 = nn.Dropout(self.dropout)
+        self.dropout2 = nn.Dropout(self.dropout)
+        self.dropout3 = nn.Dropout(self.dropout)
+
+    def causal_mask(self, 
+                batch_size: int, 
+                destination_dim: int, 
+                source_dim: int) -> jnp.ndarray:
+        """
+        Generate a causal mask for self-attention.
+
+        Args:
+            batch_size (int): Batch size.
+            destination_dim (int): Dimension of the destination sequence.
+            source_dim (int): Dimension of the source sequence.
+
+        Returns:
+            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
+        """
+        # Create index tensors for the source and destination dimensions
+        idx_source = jnp.arange(destination_dim)[:, None]
+        idx_destination = jnp.arange(source_dim)
+        mask = idx_source >= idx_destination - source_dim + destination_dim
+        mask = mask.astype(jnp.int32) 
+
+        # Expand dimensions to match the required output shape
+        mask = mask[None, None, :, :]
+        return jnp.broadcast_to(mask, (batch_size, self.num_heads, destination_dim, source_dim))
+
+    def __call__(self, 
+                x: jnp.ndarray, 
+                mask: jnp.ndarray = None, 
+                training: bool = False) -> tuple:
+        """
+        Apply the DecoderBlock to input data.
+
+        Args:
+            x (jnp.ndarray): Input tensor.
+            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
+            training (bool): Training mode.
+
+        Returns:
+            tuple: Output tensor, attention tensor, and cross-attention tensor.
+        """
+        mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
+
+        x = self.norm1(x)
+        attended_x, attention1 = self.attention1(x, mask=mask)
+        x = self.dropout1(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm2(x)
+        attended_x, attention2 = self.attention2(x, mask=mask)
+        x = self.dropout2(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm3(x)
+        output = self.feed_forward(x)
+        x = self.dropout3(output, deterministic=not training)
+        x += attended_x
+
+        return x, jnp.array(attention1), jnp.array(attention2)
+    
+
+class GPT3Decoder(nn.Module):
+    """
+    Transformer Decoder.
+
+    Args:
+        num_layers (int): Number of decoder layers.
+        hidden_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
+    """
+    num_layers: int
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+
+    def setup(self):
+        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
+                                  features=self.embed_dim)
+        
+        self.layers = [GPT3Block(self.hidden_dim, 
+                                    self.num_heads, 
+                                    self.feedforward_dim, 
+                                    self.dropout) for _ in range(self.num_layers)]
+        
+        self.outputs = nn.Dense(self.vocab_size)
+        
+
+    def __call__(self, 
+                 x: jnp.ndarray,
+                 mask: jnp.ndarray = None, 
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> tuple:
+        """
+        Apply the TransformerDecoder to input data.
+
+        Args:
+            x (jnp.ndarray): Input tensor.
+            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
+            training (bool): Training mode.
+
+        Returns:
+            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
+            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
+        """
+        attention_maps = []
+        x = self.embedding(x)
+        cross_attention_maps = []
+        for layer in self.layers:
+            x, attention, cross_attention = layer(x, mask=mask, training=training)
+            attention_maps.append(attention)
+            cross_attention_maps.append(cross_attention)
+
+        if not drop_last_layer:
+            x = self.outputs(x)
+            
+        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
+    
+
+class GPT3(nn.Module):
+
+    num_layers: int
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+    max_length: int
+    start_token: int
+    end_token: int
+
+    """
+    Decoder-only model from OpenAI's GPT-3 paper: https://arxiv.org/abs/2005.14165
+
+    Args:
+        num_layers (int): Number of layers in the encoder and decoder.
+        num_heads (int): Number of attention heads in the multi-head attention layers.
+        feedforward_dim (int): Dimensionality of the feedforward layers.
+        dropout (float): Dropout probability.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimensionality of embeddings.
+        max_length (int): Maximum length of generated sequences.
+        start_token (int): Token ID for the start of sequence.
+        end_token (int): Token ID for the end of sequence.
+    """
+
+    def setup(self):
+        """
+        Initialize the T5 model by setting up the encoder and decoder.
+        """
+        self.decoder = GPT3Decoder(self.num_layers,
+                                self.embed_dim,
+                                self.num_heads,
+                                self.feedforward_dim,
+                                self.dropout,
+                                self.vocab_size,
+                                self.embed_dim)
+        
+        
+    def __call__(self, 
+                 x: jnp.ndarray,
+                 training: bool = True,
+                 drop_last_layer: bool = False) -> jnp.ndarray:
+        
+        """ 
+        Causal models are trained differently, the outputs are just the inputs shifted by 1
+        While the generation is autoregressve, hence a different function for that
+        """
+        return self.decoder(x=x, 
+                            training=training,
+                            drop_last_layer=drop_last_layer)[0]
+
+
+    def generate(self, 
+                 x: Optional[jnp.ndarray] = None,
+                 temperature: float = 1.0,
+                 deterministic: bool = False) -> Tuple[jnp.ndarray]:
+        """
+        Generate sequences either from scratch or continues from the input sequence.
+
+        Args:
+            x (jax.numpy.ndarray, optional): Input sequence.
+            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
+            seed (int, optional): Random seed for reproducibility.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
+
+        Returns:
+            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
+        """
+        if x is not None:
+            assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
+            
+        decoder_input = x if x is not None else jnp.array([[self.start_token]])
+        output_sequence = []
+
+        # Autoregressive decoding loop
+        for _ in range(self.max_length):
+            decoder_output = self.decoder(decoder_input, training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
+            next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                next_token = jax.random.categorical(jax.random.PRNGKey(int(time.time())), next_token_probabilities, axis=-1)
+
+            next_token = next_token[0]
+            output_sequence.append(next_token.item())
+            decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
+
+            if next_token.item() == self.end_token:
+                break
+
+        return tuple(output_sequence)
+    
+
+    def generate_batch(self, 
+                 x: Optional[jnp.ndarray] = None,
+                 temperature: float = 1.0,
+                 deterministic: bool = False) -> jnp.ndarray:
+        """
+        Generate sequences either from scratch or continues from the input sequence in batch.
+
+        Args:
+            x (jax.numpy.ndarray, optional): Batch of input sequences.
+            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
+
+        Returns:
+            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
+        """
+
+        batch_size = x.shape[0] if x is not None else 1
+        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
+
+        for i in range(self.max_length):
+            decoder_output = self.decoder(decoder_input, training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
+            next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                key = jax.random.PRNGKey(int(time.time()))
+                next_token = jax.random.categorical(key, next_token_probabilities, axis=-1)
+
+            output_sequences = output_sequences.at[:, i].set(next_token)
+            decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
+
+            if jnp.all(next_token == self.end_token):
+                break
+
+        return output_sequences
+    
+
+class SparseMixtureOfExperts(nn.Module):
+    """
+    Mixture of Experts Layer with Top-K Gating.
+
+    This layer consists of multiple expert feed-forward networks and a gating mechanism
+    that determines the contribution of each expert based on the input. Unlike the
+    traditional Mixture of Experts, this implementation only computes the outputs
+    for the top K experts as determined by the gating mechanism for each input.
+
+    Attributes:
+        num_hiddens (int): Number of hidden units in each expert.
+        num_outputs (int): Number of output units in the final layer after combining expert outputs.
+        num_experts (int): Number of experts in the mixture.
+        top_k (int): Number of top experts to use for each input instance.
+
+    Args:
+        num_hiddens (int): Number of hidden units in each expert network.
+        num_outputs (int): Number of output units in the final layer.
+        num_experts (int): Number of experts.
+        top_k (int): Number of top experts to use for each input instance.
+
+    Methods:
+        setup(): Initializes the experts, the gating mechanism, and the final dense layer.
+
+        __call__(X: jnp.ndarray) -> jnp.ndarray:
+            Performs a forward pass through the Mixture of Experts layer.
+
+            Args:
+                X (jnp.ndarray): Input tensor of shape (batch_size, seq_length, input_dim).
+
+            Returns:
+                jnp.ndarray: Output tensor after processing through the MoE layer. The output
+                tensor has the same batch and sequence length dimensions as the input tensor,
+                but the last dimension is equal to num_outputs.
+    """
+    num_hiddens: int
+    num_outputs: int
+    num_experts: int
+    top_k: int # Number of top experts to use each pass
+
+    def setup(self):
+        self.experts = [PositionWiseFFN(self.num_hiddens, 
+                                        self.num_outputs) for _ in range(self.num_experts)
                                 ]
         self.gate = nn.Dense(self.num_experts, 
                             kernel_init=nn.initializers.xavier_uniform()
@@ -179,62 +523,29 @@ class MixtureOfExperts(nn.Module):
         self.dense_final = nn.Dense(self.num_outputs, 
                                     kernel_init=nn.initializers.xavier_uniform()
                                     )
-        self.activation = GEGLU(self.num_hiddens)
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Forward pass through the Mixture of Experts layer.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after processing through the MoE layer.
-        """
         gating_weights = nn.softmax(self.gate(X), axis=-1)
-        
-        # The shape of expert_outputs is (batch_size, seq_length, num_experts, num_hiddens)
+
+        # Get top K experts for each example in the batch
+        top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k:]
+
+        # Get expert outputs
         expert_outputs = jnp.stack([expert(X) for expert in self.experts], axis=2)
 
-        # The shape of gating_weights is (batch_size, seq_length, num_experts)
-        # It needs to be reshaped to (batch_size, seq_length, num_experts, 1) for broadcasting
-        gating_weights = gating_weights[..., None]
+        # Select only the top K expert outputs
+        batch_size, seq_length, _ = X.shape
+        batch_indices = jnp.arange(batch_size)[:, None, None]
+        seq_indices = jnp.arange(seq_length)[None, :, None]
+        top_k_expert_outputs = expert_outputs[batch_indices, seq_indices, top_k_indices]
 
-        # Element-wise multiplication with broadcasting
-        mixed_expert_output = jnp.sum(gating_weights * expert_outputs, axis=2)
+        # Compute the gating weights for the selected top K experts
+        top_k_gating_weights = jnp.take_along_axis(gating_weights, top_k_indices, axis=-1)
 
-        return self.dense_final(self.activation(mixed_expert_output))
-    
+        # Compute the mixed expert output
+        mixed_expert_output = jnp.sum(top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2)
 
-class PositionWiseFFNMoE(nn.Module):
-    """
-    Position-wise Feed-Forward Network with Mixture of Experts.
-
-    Args:
-        num_hiddens (int): Number of hidden units in each expert.
-        num_outputs (int): Number of output units in the final layer.
-        num_experts (int): Number of experts in the MoE layer.
-    """
-    num_hiddens: int
-    num_outputs: int
-    num_experts: int
-
-    def setup(self):
-        self.moe_layer = MixtureOfExperts(num_experts=self.num_experts, 
-                                        num_hiddens=self.num_hiddens, 
-                                        num_outputs=self.num_outputs)
-
-    def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFNMoE to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the MoE layer.
-        """
-        return self.moe_layer(X)
+        return self.dense_final(mixed_expert_output)
     
 
 class GPT4Block(nn.Module):
@@ -252,11 +563,15 @@ class GPT4Block(nn.Module):
     feedforward_dim: int
     dropout: float
     num_experts: int
+    top_k: int
 
     def setup(self):
         self.attention1 = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
         self.attention2 = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
-        self.feed_forward = PositionWiseFFNMoE(self.feedforward_dim, self.hidden_dim, self.num_experts)
+        self.feed_forward = SparseMixtureOfExperts(self.feedforward_dim, 
+                                                   self.hidden_dim, 
+                                                   self.num_experts, 
+                                                   self.top_k)
         self.norm1 = nn.LayerNorm(self.dropout)
         self.norm2 = nn.LayerNorm(self.dropout)
         self.norm3 = nn.LayerNorm(self.dropout)
@@ -343,6 +658,7 @@ class GPT4Decoder(nn.Module):
     vocab_size: float
     embed_dim: float
     num_experts: int
+    top_k: int
 
     def setup(self):
         self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
@@ -352,7 +668,8 @@ class GPT4Decoder(nn.Module):
                                     self.num_heads, 
                                     self.feedforward_dim, 
                                     self.dropout,
-                                    self.num_experts) for _ in range(self.num_layers)]
+                                    self.num_experts,
+                                    self.top_k) for _ in range(self.num_layers)]
         
         self.outputs = nn.Dense(self.vocab_size)
         
@@ -415,6 +732,7 @@ class GPT4(nn.Module):
     start_token: int
     end_token: int
     num_experts: int = 10
+    top_k: int = 2
 
     def setup(self):
         self.decoder = GPT4Decoder(self.num_layers,
@@ -424,7 +742,8 @@ class GPT4(nn.Module):
                                 self.dropout,
                                 self.vocab_size,
                                 self.embed_dim,
-                                self.num_experts)
+                                self.num_experts,
+                                self.top_k)
         
         
     def __call__(self, 
@@ -526,7 +845,7 @@ class GPT4(nn.Module):
         return output_sequences
     
 
-class GPT4DataParallelTrainer:
+class GPTDataParallelTrainer:
     """
     A class for training a GPT model using data parallelism.
 
@@ -550,8 +869,8 @@ class GPT4DataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(GPT4DataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(GPT4DataParallelTrainer.evaluation_step, axis_name='devices')
+        self.train_step = jax.pmap(GPTDataParallelTrainer.train_step, axis_name='devices')
+        self.evaluation_step = jax.pmap(GPTDataParallelTrainer.evaluation_step, axis_name='devices')
         self.state = self.create_train_state(learning_rate, input_shape)
         print(f'Number of accelerators: {self.num_devices}')
     

@@ -200,7 +200,6 @@ class GroupedRotaryMultiHeadAttention(nn.Module):
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
 
-
     def __call__(self, 
                  inputs: jnp.ndarray, 
                  context: jnp.ndarray, 
@@ -229,21 +228,19 @@ class GroupedRotaryMultiHeadAttention(nn.Module):
         # Repeat the key and values
         key = jnp.repeat(key, self.num_heads, axis=-1)
         value = jnp.repeat(value, self.num_heads, axis=-1)
-        
-        # Apply RoPE to query and key
-        context_vectors, attention_maps = [], []
-        for q in grouped_query:
-            q, k = self.rope(q, key)
-            output, attention = self.attention_function(q, k, value, mask=mask)
-            context_vectors.append(output)
-            attention_maps.append(attention)
+
+        # Vectorize the process_group function
+        vectorized_process_group = jax.vmap(self.process_group, in_axes=(0, None, None, None))
+        results = vectorized_process_group(grouped_query, key, value, mask)
 
         # Merge the groups back together
-        context_vectors = jnp.concatenate(context_vectors, axis=-1)
-        attention = jnp.concatenate(attention_maps, axis=0)
-        outputs = self.output(context_vectors)
-        return outputs, attention
+        context_vectors = jnp.concatenate(results[0], axis=-1)
+        return self.output(context_vectors), results[1]
     
+    def process_group(self, query, key, value, mask):
+        query, key = self.rope(query, key)
+        return self.attention_function(query, key, value, mask=mask)
+
     def attention_function(self, query, key, value, mask=None):
         input_length = query.shape[1]
         context_length = key.shape[1]
@@ -763,57 +760,3 @@ class LlaMADataParallelTrainer:
         with open(filename, 'rb') as f:
             params = pickle.load(f)
         return params
-    
-
-from llama import *
-
-# Dummy data parameters
-batch_size = 8
-max_length = 51
-vocab_size = 1000 
-embed_dim = 256 
-
-# Generate data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'num_groups': 2,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = LlaMA2(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
-print(outputs.shape)
-
-# Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
-
-# Generate: should always have dims (1, seq_len)
-input_sequence = jnp.array([[145, 656]])
-print(input_sequence.shape)
-
-#params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      input_sequence, 
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-
-print(outputs)

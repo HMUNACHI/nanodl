@@ -1,27 +1,32 @@
 '''
-LlaMA is built upon the transformer architecture, incorporating enhancements inspired by recent advancements in the field of large language models. 
-These improvements are drawn from various sources, such as GPT-3, PaLM, and GPT-Neo. Notable modifications include the adoption of pre-normalization for enhanced training stability, 
-employing the RMSNorm normalization function. Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
+Mistral 7B is a large language model (LLM) designed for enhanced efficiency and performance. It utilizes Grouped-Query Attention (GQA) to achieve quicker inference times. 
+It incorporates Sliding Window Attention (SWA), enabling it to efficiently process sequences of any length while minimizing the cost of inference. 
+Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
 Absolute positional embeddings are replaced with rotary positional embeddings (RoPE), implemented at each layer of the network. For specific hyper-parameter details, refer to Table 2 in the document.
+
+Mixtral is an architectural upgrade within Mistral. Leverages "Sparse Mixture-of-Experts" (MoE). Each layer has 8 expert groups, 
+but a "router network" selects only 2 relevant ones per token, reducing active calculations and boosting efficiency.
 
 Example usage:
 ```
-from llama import *
+from mistral import *
 
 # Dummy data parameters
 batch_size = 8
-max_length = 51
+max_length = 50
 vocab_size = 1000 
 embed_dim = 256 
 
 # Generate data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+data = jnp.arange(batch_size * (max_length+1), dtype=jnp.int32).reshape((batch_size, max_length+1))
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
+print(dummy_inputs.shape, dummy_targets.shape)
 
 # model parameters
 hyperparams = {
     'num_layers': 1,
+    'num_groups': 2,
     'hidden_dim': 256,
     'num_heads': 2,
     'feedforward_dim': 256,
@@ -31,10 +36,12 @@ hyperparams = {
     'max_length': max_length,
     'start_token': 0,
     'end_token': 50,
+    'window_size': 5,
+    'shift_size': 2
 }
 
 # Initialize model
-model = LlaMA2(**hyperparams)
+model = Mistral(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 params = model.init(rngs, dummy_inputs)['params']
 outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
@@ -42,7 +49,7 @@ print(outputs.shape)
 
 # Training on your data
 dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
 
@@ -50,7 +57,7 @@ print(trainer.evaluate(dataloader))
 input_sequence = jnp.array([[145, 656]])
 print(input_sequence.shape)
 
-#params = trainer.load_params('params.pkl')
+params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
                       input_sequence, 
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
@@ -174,37 +181,38 @@ class RotaryPositionalEncoding():
         )
     
 
-class RotaryMultiHeadAttention(nn.Module):
+class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
     """
     Attention which uses RoPE (Rotary Positional Encoding)
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
+    num_groups : int  # Number of groups to split the heads into
+    window_size: int
+    shift_size: int
 
     def setup(self):
-        # Because the Query is determined from a context, project separately
-        self.query_projection = nn.Dense(self.hidden_dim,
+        self.query_projection = nn.Dense(self.hidden_dim // self.num_heads,
+                                 kernel_init=nn.initializers.xavier_uniform(),
+                                 bias_init=nn.initializers.zeros,
+                                )
+        self.key_projection = nn.Dense(self.hidden_dim // (self.num_heads * self.num_groups),
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.key_projection = nn.Dense(self.hidden_dim,
+        self.value_projection = nn.Dense(self.hidden_dim // (self.num_heads * self.num_groups),
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
-        self.value_projection = nn.Dense(self.hidden_dim,
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
-        self.rope = RotaryPositionalEncoding(self.hidden_dim)
+        self.rope = RotaryPositionalEncoding(self.hidden_dim // self.num_groups)
         self.output = nn.Dense(self.hidden_dim,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
 
-
     def __call__(self, 
                  inputs: jnp.ndarray, 
                  context: jnp.ndarray, 
-                 mask: jnp.ndarray = None) -> tuple:
+                 mask: jnp.ndarray) -> tuple:
 
         """
         Args:
@@ -216,34 +224,95 @@ class RotaryMultiHeadAttention(nn.Module):
         Return: outputs (batch_size, seq_len, seq_len)
                 attention matrixes (batch_size, heads, seq_len, seq_len)
         """
-
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
-        query, key = self.rope(query, key) # Encode query and key with RoPE
-        context_vectors, attention = self.attention_function(query,key, value, mask=mask)
-        outputs = self.output(context_vectors)
-        return outputs, attention
+        
+        # Break query into groups and transpose to (num_groups, batch_size, seq_len, dims)
+        # This will allow vmapping over the groups for parallelization
+        grouped_query = jnp.reshape(query, (query.shape[0], query.shape[1], self.num_groups, -1))
+        grouped_query = jnp.repeat(grouped_query, self.num_heads, axis=-1)
+        grouped_query = jnp.transpose(grouped_query, (2, 0, 1, 3))
+
+        # Repeat the key and values
+        key = jnp.repeat(key, self.num_heads, axis=-1)
+        value = jnp.repeat(value, self.num_heads, axis=-1)
+        
+        # Vectorize the process_group function
+        vectorized_process_group = jax.vmap(self.process_group, in_axes=(0, None, None, None))
+        results = vectorized_process_group(grouped_query, key, value, mask)
+
+        # Merge the groups back together
+        context_vectors = jnp.concatenate(results[0], axis=-1)
+        return self.output(context_vectors), results[1]
     
-    def attention_function(self, query, key, value, mask=None):
-        input_length = query.shape[1]
-        context_length = key.shape[1]
+    def process_group(self, query, key, value, mask):
+        query, key = self.rope(query, key)
+        query_windows = self.window_partition(query)
+        key_windows = self.window_partition(key)
+        value_windows = self.window_partition(value)
+        attention_windows, attention_maps = self.attention_function(query_windows, 
+                                                                    key_windows, 
+                                                                    value_windows,
+                                                                    mask)
+
+        attention_windows = jnp.roll(attention_windows, -self.shift_size, axis=1)
+        merged = attention_windows.transpose((1, 0, 2, 3))
+        return jnp.reshape(merged, query.shape), attention_maps
+
+    def window_partition(self, x):
+        B, N, C = x.shape
+        assert N % self.window_size == 0, "Sequence length must be a multiple of the window size"
+        windows = jnp.reshape(x, (B, -1, self.window_size, C))  # (batch_size, num_windows, window_size, dim)
+        windows = windows.transpose((1, 0, 2, 3))  # Transpose to (num_windows, batch_size, window_size, dim)
+        return windows
+
+    def attention_function(self, query, key, value, mask):
+        input_length = query.shape[-2]
+        context_length = key.shape[-2]
         head_dim = query.shape[-1] // self.num_heads
         dim_key = key.shape[-1]
 
-        # Split queries, keys, and values into heads
-        query_heads = jnp.reshape(query, (query.shape[0], self.num_heads, input_length, head_dim))
-        key_heads = jnp.reshape(key, (key.shape[0], self.num_heads, context_length, head_dim))
-        value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
+        # Split keys, and values into heads
+        query_heads = jnp.reshape(query, (query.shape[0], query.shape[1], self.num_heads, input_length, head_dim))
+        key_heads = jnp.reshape(key, (key.shape[0], key.shape[1], self.num_heads, context_length, head_dim))
+        value_heads = jnp.reshape(value, (value.shape[0], value.shape[1], self.num_heads, context_length, head_dim))
 
-        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
+        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 2, 4, 3)) / jnp.sqrt(dim_key)
+
         if mask is not None:
+            mask = self.causal_mask(attention_scores.shape)
             attention_scores = attention_scores * mask
 
         attention_weights = jax.nn.softmax(attention_scores, axis=-1)
         attended_values = jnp.matmul(attention_weights, value_heads)
-        attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
+        attended_values = attended_values.transpose(0, 1, 3, 2, 4)
+        attended_values = jnp.reshape(attended_values, (query.shape[0], query.shape[1], input_length, query.shape[-1]))
         return attended_values, attention_weights
+    
+    def causal_mask(self, 
+                shape: Tuple[int, ...]) -> jnp.ndarray:
+        """
+        Generate a causal mask for attention.
+
+        Args:
+            batch_size (int): Batch size.
+            destination_dim (int): Dimension of the destination sequence.
+            source_dim (int): Dimension of the source sequence.
+
+        Returns:
+            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
+        """
+        # Create index tensors for the source and destination dimensions
+        source_dim, destination_dim = shape[-2], shape[-2]
+        idx_source = jnp.arange(destination_dim)[:, None]
+        idx_destination = jnp.arange(source_dim)
+        mask = idx_source >= idx_destination - source_dim + destination_dim
+        mask = mask.astype(jnp.int32) 
+
+        # Expand dimensions to match the required output shape
+        mask = mask[None, None, None, :, :]
+        return jnp.broadcast_to(mask, (shape[0], shape[1], shape[2], destination_dim, source_dim))
     
 
 class PositionWiseFFN(nn.Module):
@@ -266,7 +335,7 @@ class PositionWiseFFN(nn.Module):
         return self.dense2(nn.silu(self.dense1(X) * self.dense3(X)))
     
     
-class LlaMA2DecoderBlock(nn.Module):
+class MistralDecoderBlock(nn.Module):
     """
     Transformer Decoder Block.
 
@@ -280,10 +349,23 @@ class LlaMA2DecoderBlock(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
+    num_groups: int
+    window_size: int
+    shift_size: int
 
     def setup(self):
-        self.attention1 = RotaryMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
-        self.attention2 = RotaryMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
+                                                          num_heads=self.num_heads,
+                                                          num_groups=self.num_groups,
+                                                          window_size=self.window_size,
+                                                          shift_size=self.shift_size)
+        
+        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
+                                                          num_heads=self.num_heads,
+                                                          num_groups=self.num_groups,
+                                                          window_size=self.window_size,
+                                                          shift_size=self.shift_size)
+        
         self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
         self.norm1 = nn.RMSNorm(self.dropout)
         self.norm2 = nn.RMSNorm(self.dropout)
@@ -291,31 +373,6 @@ class LlaMA2DecoderBlock(nn.Module):
         self.dropout1 = nn.Dropout(self.dropout)
         self.dropout2 = nn.Dropout(self.dropout)
         self.dropout3 = nn.Dropout(self.dropout)
-
-    def causal_mask(self, 
-                batch_size: int, 
-                destination_dim: int, 
-                source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
-        # Create index tensors for the source and destination dimensions
-        idx_source = jnp.arange(destination_dim)[:, None]
-        idx_destination = jnp.arange(source_dim)
-        mask = idx_source >= idx_destination - source_dim + destination_dim
-        mask = mask.astype(jnp.int32) 
-
-        # Expand dimensions to match the required output shape
-        mask = mask[None, None, :, :]
-        return jnp.broadcast_to(mask, (batch_size, self.num_heads, destination_dim, source_dim))
 
     def __call__(self, 
                 x: jnp.ndarray,
@@ -332,15 +389,13 @@ class LlaMA2DecoderBlock(nn.Module):
         Returns:
             tuple: Output tensor, attention tensor, and cross-attention tensor.
         """
-        mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
-
         x = self.norm1(x)
-        attended_x, attention1 = self.attention1(x, x, mask=mask)
+        attended_x, attention1 = self.attention1(x, x, mask=True)
         x = self.dropout1(x, deterministic=not training)
         x += attended_x
 
         x = self.norm2(x)
-        attended_x, attention2 = self.attention2(x, x, mask=mask)
+        attended_x, attention2 = self.attention2(x, x, mask=True)
         x = self.dropout2(x, deterministic=not training)
         x += attended_x
 
@@ -351,8 +406,8 @@ class LlaMA2DecoderBlock(nn.Module):
 
         return x, jnp.array(attention1), jnp.array(attention2)
 
-    
-class LlaMA2Decoder(nn.Module):
+
+class MistralDecoder(nn.Module):
     """
     Transformer Decoder.
 
@@ -366,19 +421,25 @@ class LlaMA2Decoder(nn.Module):
     num_layers: int
     hidden_dim: int
     num_heads: int
+    num_groups: int
     feedforward_dim: int
     dropout: float
     vocab_size: float
     embed_dim: float
+    window_size: int
+    shift_size: int
 
     def setup(self):
         self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
                                   features=self.embed_dim)
         
-        self.layers = [LlaMA2DecoderBlock(self.hidden_dim, 
+        self.layers = [MistralDecoderBlock(self.hidden_dim, 
                                     self.num_heads, 
                                     self.feedforward_dim, 
-                                    self.dropout) for _ in range(self.num_layers)]
+                                    self.dropout,
+                                    self.num_groups,
+                                    self.window_size,
+                                    self.shift_size) for _ in range(self.num_layers)]
         
         self.outputs = nn.Dense(self.vocab_size)
         
@@ -415,7 +476,7 @@ class LlaMA2Decoder(nn.Module):
     
 
 
-class LlaMA2(nn.Module):
+class Mistral(nn.Module):
     """
     Args:
         num_layers (int): Number of layers in the encoder and decoder.
@@ -431,6 +492,7 @@ class LlaMA2(nn.Module):
     """
     num_layers: int
     num_heads: int
+    num_groups: int
     hidden_dim: int
     feedforward_dim: int
     dropout: float
@@ -439,18 +501,23 @@ class LlaMA2(nn.Module):
     max_length: int
     start_token: int
     end_token: int
+    window_size: int
+    shift_size: int
 
     def setup(self):
         """
-        Initialize the LlaMA model by setting up the encoder and decoder.
+        Initialize the Mistral model 
         """
-        self.decoder = LlaMA2Decoder(self.num_layers,
+        self.decoder = MistralDecoder(self.num_layers,
                                 self.hidden_dim,
                                 self.num_heads,
+                                self.num_groups,
                                 self.feedforward_dim,
                                 self.dropout,
                                 self.vocab_size,
-                                self.embed_dim)
+                                self.embed_dim,
+                                self.window_size,
+                                self.shift_size)
         
     def __call__(self, 
                  x: jnp.ndarray,
@@ -464,6 +531,19 @@ class LlaMA2(nn.Module):
         return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
+    
+    def zero_pad(self, arr, max_length):
+        """Zero-pad the given array to the specified maximum length along axis=1."""
+        current_length = arr.shape[1] 
+        num_zeros = max_length - current_length 
+
+        if num_zeros > 0:
+            zeros = jnp.zeros((arr.shape[0], num_zeros), dtype=arr.dtype)
+            padded_array = jnp.concatenate([arr, zeros], axis=1)
+        else:
+            padded_array = arr
+
+        return padded_array
     
 
     def generate(self, 
@@ -489,8 +569,8 @@ class LlaMA2(nn.Module):
         output_sequence = []
 
         # Autoregressive decoding loop
-        for _ in range(self.max_length):
-            decoder_output = self.decoder(decoder_input, training=False)[0]
+        for _ in range(self.max_length - 1):
+            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -530,8 +610,8 @@ class LlaMA2(nn.Module):
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
-        for i in range(self.max_length):
-            decoder_output = self.decoder(decoder_input, training=False)[0]
+        for i in range(self.max_length-1):
+            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -551,8 +631,378 @@ class LlaMA2(nn.Module):
         return output_sequences
 
 
+class SparseMixtureOfExperts(nn.Module):
+    """
+    Mixture of Experts Layer with Top-K Gating.
 
-class LlaMADataParallelTrainer:
+    This layer consists of multiple expert feed-forward networks and a gating mechanism
+    that determines the contribution of each expert based on the input. Unlike the
+    traditional Mixture of Experts, this implementation only computes the outputs
+    for the top K experts as determined by the gating mechanism for each input.
+
+    Attributes:
+        num_hiddens (int): Number of hidden units in each expert.
+        num_outputs (int): Number of output units in the final layer after combining expert outputs.
+        num_experts (int): Number of experts in the mixture.
+        top_k (int): Number of top experts to use for each input instance.
+
+    Args:
+        num_hiddens (int): Number of hidden units in each expert network.
+        num_outputs (int): Number of output units in the final layer.
+        num_experts (int): Number of experts.
+        top_k (int): Number of top experts to use for each input instance.
+
+    Methods:
+        setup(): Initializes the experts, the gating mechanism, and the final dense layer.
+
+        __call__(X: jnp.ndarray) -> jnp.ndarray:
+            Performs a forward pass through the Mixture of Experts layer.
+
+            Args:
+                X (jnp.ndarray): Input tensor of shape (batch_size, seq_length, input_dim).
+
+            Returns:
+                jnp.ndarray: Output tensor after processing through the MoE layer. The output
+                tensor has the same batch and sequence length dimensions as the input tensor,
+                but the last dimension is equal to num_outputs.
+    """
+    num_hiddens: int
+    num_outputs: int
+    num_experts: int = 8
+    top_k: int = 2  # Number of top experts to use
+
+    def setup(self):
+        self.experts = [PositionWiseFFN(self.num_hiddens, 
+                                        self.num_outputs) for _ in range(self.num_experts)
+                                ]
+        self.gate = nn.Dense(self.num_experts, 
+                            kernel_init=nn.initializers.xavier_uniform()
+                            )
+        self.dense_final = nn.Dense(self.num_outputs, 
+                                    kernel_init=nn.initializers.xavier_uniform()
+                                    )
+
+    def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
+        gating_weights = nn.softmax(self.gate(X), axis=-1)
+
+        # Get top K experts for each example in the batch
+        top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k:]
+
+        # Get expert outputs
+        expert_outputs = jnp.stack([expert(X) for expert in self.experts], axis=2)
+
+        # Select only the top K expert outputs
+        batch_size, seq_length, _ = X.shape
+        batch_indices = jnp.arange(batch_size)[:, None, None]
+        seq_indices = jnp.arange(seq_length)[None, :, None]
+        top_k_expert_outputs = expert_outputs[batch_indices, seq_indices, top_k_indices]
+
+        # Compute the gating weights for the selected top K experts
+        top_k_gating_weights = jnp.take_along_axis(gating_weights, top_k_indices, axis=-1)
+
+        # Compute the mixed expert output
+        mixed_expert_output = jnp.sum(top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2)
+
+        return self.dense_final(mixed_expert_output)
+    
+
+class MixtralDecoderBlock(nn.Module):
+    """
+    Transformer Decoder Block with Mixture-of-Experts Feed Forward..
+
+    Args:
+        hidden_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
+    """
+    hidden_dim: int
+    num_heads: int
+    feedforward_dim: int
+    dropout: float
+    num_groups: int
+    window_size: int
+    shift_size: int
+
+    def setup(self):
+        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
+                                                          num_heads=self.num_heads,
+                                                          num_groups=self.num_groups,
+                                                          window_size=self.window_size,
+                                                          shift_size=self.shift_size)
+        
+        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
+                                                          num_heads=self.num_heads,
+                                                          num_groups=self.num_groups,
+                                                          window_size=self.window_size,
+                                                          shift_size=self.shift_size)
+        
+        self.feed_forward = SparseMixtureOfExperts(self.feedforward_dim, self.hidden_dim)
+        self.norm1 = nn.RMSNorm(self.dropout)
+        self.norm2 = nn.RMSNorm(self.dropout)
+        self.norm3 = nn.RMSNorm(self.dropout)
+        self.dropout1 = nn.Dropout(self.dropout)
+        self.dropout2 = nn.Dropout(self.dropout)
+        self.dropout3 = nn.Dropout(self.dropout)
+
+    def __call__(self, 
+                x: jnp.ndarray,
+                training: bool = False) -> tuple:
+        """
+        Apply the DecoderBlock to input data.
+
+        Args:
+            x (jnp.ndarray): Input tensor.
+            context (jnp.ndarray): Context tensor.
+            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
+            training (bool): Training mode.
+
+        Returns:
+            tuple: Output tensor, attention tensor, and cross-attention tensor.
+        """
+        x = self.norm1(x)
+        attended_x, attention1 = self.attention1(x, x, mask=True)
+        x = self.dropout1(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm2(x)
+        attended_x, attention2 = self.attention2(x, x, mask=True)
+        x = self.dropout2(x, deterministic=not training)
+        x += attended_x
+
+        x = self.norm3(x)
+        output = self.feed_forward(x)
+        x = self.dropout3(x, deterministic=not training)
+        x += output
+
+        return x, jnp.array(attention1), jnp.array(attention2)
+
+    
+class MixtralDecoder(nn.Module):
+    """
+    Transformer Decoder.
+
+    Args:
+        num_layers (int): Number of decoder layers.
+        hidden_dim (int): Input dimension.
+        num_heads (int): Number of attention heads.
+        feedforward_dim (int): Dimension of the feed-forward network.
+        dropout (float): Dropout rate.
+    """
+    num_layers: int
+    hidden_dim: int
+    num_heads: int
+    num_groups: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+    window_size: int
+    shift_size: int
+
+    def setup(self):
+        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
+                                  features=self.embed_dim)
+        
+        self.layers = [MixtralDecoderBlock(self.hidden_dim, 
+                                    self.num_heads, 
+                                    self.feedforward_dim, 
+                                    self.dropout,
+                                    self.num_groups,
+                                    self.window_size,
+                                    self.shift_size) for _ in range(self.num_layers)]
+        
+        self.outputs = nn.Dense(self.vocab_size)
+        
+
+    def __call__(self, 
+                 x: jnp.ndarray,
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> tuple:
+        """
+        Apply the TransformerDecoder to input data.
+
+        Args:
+            x (jnp.ndarray): Input tensor.
+            context (jnp.ndarray): Context tensor.
+            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
+            training (bool): Training mode.
+
+        Returns:
+            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
+            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
+        """
+        attention_maps = []
+        x = self.embedding(x)
+        cross_attention_maps = []
+        for layer in self.layers:
+            x, attention, cross_attention = layer(x, training=training)
+            attention_maps.append(attention)
+            cross_attention_maps.append(cross_attention)
+
+        if not drop_last_layer:
+            x = self.outputs(x)
+
+        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
+    
+
+
+class Mixtral(nn.Module):
+    """
+    Args:
+        num_layers (int): Number of layers in the encoder and decoder.
+        num_heads (int): Number of attention heads in the multi-head attention layers.
+        hidden_dim (int): Dimensionality of input embeddings.
+        feedforward_dim (int): Dimensionality of the feedforward layers.
+        dropout (float): Dropout probability.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimensionality of token embeddings.
+        max_length (int): Maximum length of generated sequences.
+        start_token (int): Token ID for the start of sequence.
+        end_token (int): Token ID for the end of sequence.
+    """
+    num_layers: int
+    num_heads: int
+    num_groups: int
+    hidden_dim: int
+    feedforward_dim: int
+    dropout: float
+    vocab_size: float
+    embed_dim: float
+    max_length: int
+    start_token: int
+    end_token: int
+    window_size: int
+    shift_size: int
+
+    def setup(self):
+        """
+        Initialize the Mistral model 
+        """
+        self.decoder = MixtralDecoder(self.num_layers,
+                                self.hidden_dim,
+                                self.num_heads,
+                                self.num_groups,
+                                self.feedforward_dim,
+                                self.dropout,
+                                self.vocab_size,
+                                self.embed_dim,
+                                self.window_size,
+                                self.shift_size)
+        
+    def __call__(self, 
+                 x: jnp.ndarray,
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> jnp.ndarray:
+        
+        """ 
+        Sequence-to-sequence models use teacher forcing during training and as such, 
+        the decoder input is the ground truth sequence.
+        """
+        return self.decoder(x=x, 
+                            training=training,
+                            drop_last_layer=drop_last_layer)[0]
+    
+    def zero_pad(self, arr, max_length):
+        """Zero-pad the given array to the specified maximum length along axis=1."""
+        current_length = arr.shape[1]
+        num_zeros = max_length - current_length
+
+        if num_zeros > 0:
+            zeros = jnp.zeros((arr.shape[0], num_zeros), dtype=arr.dtype)
+            padded_array = jnp.concatenate([arr, zeros], axis=1)
+        else:
+            padded_array = arr
+
+        return padded_array
+    
+
+    def generate(self, 
+                 x: Optional[jnp.ndarray] = None,
+                 temperature: float = 1.0,
+                 deterministic: bool = False) -> Tuple[jnp.ndarray]:
+        """
+        Generate sequences either from scratch or continues from the input sequence.
+
+        Args:
+            x (jax.numpy.ndarray, optional): Input sequence.
+            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
+            seed (int, optional): Random seed for reproducibility.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
+
+        Returns:
+            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
+        """
+        if x is not None:
+            assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
+
+        decoder_input = x if x is not None else jnp.array([[self.start_token]])
+        output_sequence = []
+
+        # Autoregressive decoding loop
+        for _ in range(self.max_length-1):
+            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
+            next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                next_token = jax.random.categorical(jax.random.PRNGKey(int(time.time())), next_token_probabilities, axis=-1)
+
+            next_token = next_token[0]
+            output_sequence.append(next_token.item())
+            decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
+
+            if next_token.item() == self.end_token or len(output_sequence) == self.max_length:
+                break
+
+        return tuple(output_sequence)
+    
+
+    def generate_batch(self, 
+                 x: Optional[jnp.ndarray] = None,
+                 temperature: float = 1.0,
+                 deterministic: bool = False) -> jnp.ndarray:
+        """
+        Generate sequences either from scratch or continues from the input sequence in batch.
+
+        Args:
+            x (jax.numpy.ndarray, optional): Batch of input sequences.
+            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
+            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
+
+        Returns:
+            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
+        """
+
+        batch_size = x.shape[0] if x is not None else 1
+        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
+
+        for i in range(self.max_length-1):
+            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+            last_token_logits = decoder_output[:, -1, :]
+            scaled_logits = last_token_logits / temperature
+            next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
+
+            if deterministic:
+                next_token = jnp.argmax(next_token_probabilities, axis=-1)
+            else:
+                key = jax.random.PRNGKey(int(time.time()))
+                next_token = jax.random.categorical(key, next_token_probabilities, axis=-1)
+
+            output_sequences = output_sequences.at[:, i].set(next_token)
+            decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
+
+            if jnp.all(next_token == self.end_token) or len(output_sequences) == self.max_length:
+                break
+
+        return output_sequences
+    
+    
+class MistralDataParallelTrainer:
     """
     A class for training a GPT model using data parallelism.
 
@@ -576,8 +1026,8 @@ class LlaMADataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(LlaMADataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(LlaMADataParallelTrainer.evaluation_step, axis_name='devices')
+        self.train_step = jax.pmap(MistralDataParallelTrainer.train_step, axis_name='devices')
+        self.evaluation_step = jax.pmap(MistralDataParallelTrainer.evaluation_step, axis_name='devices')
         self.state = self.create_train_state(learning_rate, input_shape)
         print(f'Number of accelerators: {self.num_devices}')
     
@@ -737,22 +1187,22 @@ class LlaMADataParallelTrainer:
         return params
     
 
-from llama import *
-
 # Dummy data parameters
 batch_size = 8
-max_length = 51
+max_length = 50
 vocab_size = 1000 
 embed_dim = 256 
 
 # Generate data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+data = jnp.arange(batch_size * (max_length+1), dtype=jnp.int32).reshape((batch_size, max_length+1))
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
+print(dummy_inputs.shape, dummy_targets.shape)
 
 # model parameters
 hyperparams = {
     'num_layers': 1,
+    'num_groups': 2,
     'hidden_dim': 256,
     'num_heads': 2,
     'feedforward_dim': 256,
@@ -762,10 +1212,12 @@ hyperparams = {
     'max_length': max_length,
     'start_token': 0,
     'end_token': 50,
+    'window_size': 5,
+    'shift_size': 2
 }
 
 # Initialize model
-model = LlaMA2(**hyperparams)
+model = Mistral(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
 params = model.init(rngs, dummy_inputs)['params']
 outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
@@ -773,7 +1225,7 @@ print(outputs.shape)
 
 # Training on your data
 dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
 
@@ -781,7 +1233,7 @@ print(trainer.evaluate(dataloader))
 input_sequence = jnp.array([[145, 656]])
 print(input_sequence.shape)
 
-#params = trainer.load_params('params.pkl')
+params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
                       input_sequence, 
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
