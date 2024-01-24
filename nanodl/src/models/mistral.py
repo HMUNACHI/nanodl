@@ -1,13 +1,12 @@
 '''
-Transformers are a groundbreaking class of deep learning models originally introduced in the paper "Attention Is All You Need" by Vaswani et al. 
-Their motivation stems from addressing limitations in previous sequence-to-sequence models and enabling more efficient and parallelizable training. 
-The key innovation of transformers is the self-attention mechanism, which allows the model to weigh the importance of different parts of the input sequence during processing. 
-This architecture has had a profound impact on natural language processing and has been adapted for a wide range of tasks, including machine translation, text generation, image captioning, and more. 
-Transformers have become the foundation for various state-of-the-art models, including BERT, GPT, and Transformer, which have achieved remarkable results across multiple domains, showcasing the power of attention-based architectures in deep learning.
+LlaMA is built upon the transformer architecture, incorporating enhancements inspired by recent advancements in the field of large language models. 
+These improvements are drawn from various sources, such as GPT-3, PaLM, and GPT-Neo. Notable modifications include the adoption of pre-normalization for enhanced training stability, 
+employing the RMSNorm normalization function. Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
+Absolute positional embeddings are replaced with rotary positional embeddings (RoPE), implemented at each layer of the network. For specific hyper-parameter details, refer to Table 2 in the document.
 
 Example usage:
 ```
-from transformer import *
+from llama import *
 
 # Dummy data parameters
 batch_size = 8
@@ -35,22 +34,23 @@ hyperparams = {
 }
 
 # Initialize model
-model = Transformer(**hyperparams)
+model = LlaMA2(**hyperparams)
 rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs, dummy_targets)['params']
-outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs)
+params = model.init(rngs, dummy_inputs)['params']
+outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
 print(outputs.shape)
 
 # Training on your data
 dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = TransformerDataParallelTrainer(model, dummy_inputs.shape, dummy_targets.shape, 'params.pkl')
+trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
 
-# Generate: should always have dims (batch_size, seq_len)
-input_sequence = jnp.array([[123, 456], [145, 656]])
+# Generate: should always have dims (1, seq_len)
+input_sequence = jnp.array([[145, 656]])
+print(input_sequence.shape)
 
-params = trainer.load_params('params.pkl')
+#params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
                       input_sequence, 
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
@@ -67,65 +67,116 @@ import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
-from typing import List, Tuple, Any, Optional, Dict, Iterable
+from typing import Tuple, Any, Optional, Iterable
 
 
-class PositionalEncoding(nn.Module):
+class RotaryPositionalEncoding():
     """
-    Positional Encoding.
-    Args:
-        num_embeddings (int): Number of embeddings.
-        features (int): Number of features in the embeddings.
+    The rotary position embeddings from RoFormer_ (Su et. al).
+    A crucial insight from the method is that the query and keys are
+    transformed by rotation matrices which depend on the relative positions.
+
+    Other implementations are available in the Rotary Transformer repo_ and in
+    GPT-NeoX_, GPT-NeoX was an inspiration
+
+    .. _RoFormer: https://arxiv.org/abs/2104.09864
+    .. _repo: https://github.com/ZhuiyiTechnology/roformer
+    .. _GPT-NeoX: https://github.com/EleutherAI/gpt-neox
+
+
+    .. This is implemented outside nn module as is modifies an external state
+       It is also puporsefully broken down for explainability
     """
-    num_embeddings: int
-    features: int
 
-    def setup(self):
-        positional_encoding = jnp.zeros((self.features, self.num_embeddings))
-        position = jnp.arange(0, self.features, dtype=jnp.float32)[:, None]
-        div_term = jnp.exp(jnp.arange(0, self.num_embeddings, 2) * (-jnp.log(10000.0) / self.num_embeddings))
-        positional_encoding = positional_encoding.at[:, 0::2].set(jnp.sin(position * div_term))
-        positional_encoding = positional_encoding.at[:, 1::2].set(jnp.cos(position * div_term))
-        self.positional_encoding = positional_encoding.T
+    def __init__(self, dim_model: int):
+        """
+        Args:
+            dim_model: The dimension of the input and output embeddings.
+        """
+        super().__init__()
+        self.dim_model = dim_model
 
-    def __call__(self, x):
-        x = x + self.positional_encoding[:x.shape[1]]
-        return x
+        inv_freq = 1.0 / (10000 ** (jnp.arange(0, dim_model, 2, dtype=jnp.float32) / dim_model))
+        self.inv_freq = inv_freq
 
+        self._seq_len_cached = None
+        self._cos_cached = None
+        self._sin_cached = None
 
-class TokenAndPositionEmbedding(nn.Module):
-    """
-    Token and Position Embedding.
-    Args:
-        max_len (int): Maximum sequence length.
-        vocab_size (int): Vocabulary size.
-        embed_dim (int): Embedding dimension.
-    """
-    max_len : int
-    vocab_size : int
-    embed_dim : int
-    learned_position : bool
+    def _update_cos_sin_tables(self, x, seq_dimension=1):
+        """
+        Update the cached cosine and sine tables, if necessary.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+            seq_dimension: The dimension that represents the sequence length.
+
+        Returns:
+            The updated cosine and sine tables.
+        """
+        seq_len = x.shape[seq_dimension]
+
+        if seq_len != self._seq_len_cached:
+            self._seq_len_cached = seq_len
+            t = jnp.arange(seq_len, dtype=self.inv_freq.dtype)
+            freqs = jnp.outer(t, self.inv_freq)
+            emb = jnp.concatenate((freqs, freqs), axis=-1)
+            self._cos_cached = jnp.cos(emb)[None, None, :, :]
+            self._sin_cached = jnp.sin(emb)[None, None, :, :]
+
+        return self._cos_cached, self._sin_cached
+
+    def rotate_half(self, x):
+        """
+        Split the input tensor into two halves, rotate the second half by 180 degrees, and concatenate the two halves back together.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+
+        Returns:
+            The rotated tensor.
+        """
+        x1, x2 = jnp.split(x, 2, axis=-1)
+        return jnp.concatenate((-x2, x1), axis=-1)
+
+    def apply_rotary_pos_emb(self, x, cos, sin):
+        """
+         Apply the rotary position embeddings to the input tensor.
+
+        Args:
+            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
+            cos: The cosine table, of shape `(batch_size, 1, seq_len, dim)`.
+            sin: The sine table, of shape `(batch_size, 1, seq_len, dim)`.
+
+        Returns:
+            The embedded tensor.
+        """
+        cos = cos[:, :, : x.shape[-2], :]
+        sin = sin[:, :, : x.shape[-2], :]
+        return (x * cos) + (self.rotate_half(x) * sin)
+
+    def __call__(self, q, k):
+        """
+         Apply the rotary position embeddings to the query and key tensors.
+
+        Args:
+            q: The query tensor, of shape `(batch_size, seq_len, dim)`.
+            k: The key tensor, of shape `(batch_size, seq_len, dim)`.
+
+        Returns:
+            The embedded query and key tensors.
+        """
+        self._cos_cached, self._sin_cached = self._update_cos_sin_tables(k, seq_dimension=-2)
+
+        return (
+            self.apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached)[0],
+            self.apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached)[0],
+        )
     
-    def setup(self):
-        self.token_embeddings = nn.Embed(num_embeddings=self.vocab_size, features=self.embed_dim)
 
-        if self.learned_position:
-            self.position_embeddings = nn.Embed(num_embeddings=self.max_len, features=self.embed_dim)
-        else:
-            self.position_embeddings = PositionalEncoding(num_embeddings=self.max_len, features=self.embed_dim)
-
-    def __call__(self, x):
-        x = self.token_embeddings(x)
-        if self.learned_position:
-            return x + self.position_embeddings(jnp.arange(x.shape[1]))
-        else:
-            return x + self.position_embeddings(x)
-    
-
-class MultiHeadAttention(nn.Module):
+class RotaryMultiHeadAttention(nn.Module):
     """
-    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
-    This involves transforming the input by weighting features by importance.
+    Attention which uses RoPE (Rotary Positional Encoding)
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
@@ -144,6 +195,7 @@ class MultiHeadAttention(nn.Module):
                                  kernel_init=nn.initializers.xavier_uniform(),
                                  bias_init=nn.initializers.zeros 
                                 )
+        self.rope = RotaryPositionalEncoding(self.hidden_dim)
         self.output = nn.Dense(self.hidden_dim,
                                kernel_init=nn.initializers.xavier_uniform(),
                                bias_init=nn.initializers.zeros)
@@ -164,9 +216,11 @@ class MultiHeadAttention(nn.Module):
         Return: outputs (batch_size, seq_len, seq_len)
                 attention matrixes (batch_size, heads, seq_len, seq_len)
         """
+
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
+        query, key = self.rope(query, key) # Encode query and key with RoPE
         context_vectors, attention = self.attention_function(query,key, value, mask=mask)
         outputs = self.output(context_vectors)
         return outputs, attention
@@ -194,165 +248,25 @@ class MultiHeadAttention(nn.Module):
 
 class PositionWiseFFN(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Position-wise Feed-Forward Network which incorporates SwiGLU activation.
 
     Args:
         num_hiddens (int): Number of hidden units in the feed-forward layers.
         num_outputs (int): Number of output units in the feed-forward layers.
     """
-    num_hiddens: int
-    num_outputs: int
+    hidden_dim: int
+    dim: int
 
     def setup(self):
-        self.dense1 = nn.Dense(self.num_hiddens, kernel_init=nn.initializers.xavier_uniform())
-        self.activation = nn.gelu
-        self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
+        self.dense1 = nn.Dense(self.hidden_dim, kernel_init=nn.initializers.xavier_uniform())
+        self.dense2 = nn.Dense(self.dim, kernel_init=nn.initializers.xavier_uniform())
+        self.dense3 = nn.Dense(self.hidden_dim, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFN to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the feed-forward network.
-        """
-        return self.dense2(self.activation(self.dense1(X)))
-    
-
-class AddNorm(nn.Module):
-    """
-    Residual connection followed by layer normalization.
-
-    Args:
-        dropout (float): Dropout rate for the residual connection.
-    """
-    dropout: int
-
-    @nn.compact
-    def __call__(self, 
-                 X: jnp.ndarray, 
-                 Y: jnp.ndarray, 
-                 training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
-        return nn.LayerNorm()(
-            nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
-    
-
-class TransformerEncoderBlock(nn.Module):
-    """
-    Transformer Encoder Block.
-
-    Args:
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
-    """
-    hidden_dim: int
-    num_heads: int
-    feedforward_dim: int
-    dropout: float
-
-    def setup(self):
-        self.attention = MultiHeadAttention(hidden_dim=self.hidden_dim,
-                                            num_heads=self.num_heads)
-        self.linear = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
-
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
-        attended_x, attention = self.attention(x, x, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
-        linear_output = self.linear(x)
-        x = self.add_norm2(x, linear_output, training)
-        return x, attention
+        return self.dense2(nn.silu(self.dense1(X) * self.dense3(X)))
     
     
-class TransformerEncoder(nn.Module):
-    """
-    Transformer Encoder.
-
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
-    """
-    num_layers: int
-    hidden_dim: int
-    num_heads: int
-    feedforward_dim: int
-    dropout: float
-    max_len : int
-    vocab_size : int
-    embed_dim : int
-    learned_position : bool = True
-
-
-    def setup(self):
-        self.embedding = TokenAndPositionEmbedding(self.max_len,
-                                                   self.vocab_size,
-                                                   self.embed_dim,
-                                                   self.learned_position)
-        
-        self.layers = [TransformerEncoderBlock(self.hidden_dim, 
-                                    self.num_heads, 
-                                    self.feedforward_dim, 
-                                    self.dropout)
-                       for _ in range(self.num_layers)]
-
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
-        """
-        Apply the TransformerEncoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and list of attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
-        attention_maps = []
-        x = self.embedding(x)
-        for layer in self.layers:
-            x, attention = layer(x, mask=mask, training=training)
-            attention_maps.append(attention)
-        return x, jnp.array(attention_maps)
-    
-
-class TransformerDecoderBlock(nn.Module):
+class LlaMA2DecoderBlock(nn.Module):
     """
     Transformer Decoder Block.
 
@@ -368,12 +282,15 @@ class TransformerDecoderBlock(nn.Module):
     dropout: float
 
     def setup(self):
-        self.attention1 = MultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
-        self.attention2 = MultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.attention1 = RotaryMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
+        self.attention2 = RotaryMultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
         self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
-        self.add_norm3 = AddNorm(self.dropout)
+        self.norm1 = nn.RMSNorm(self.dropout)
+        self.norm2 = nn.RMSNorm(self.dropout)
+        self.norm3 = nn.RMSNorm(self.dropout)
+        self.dropout1 = nn.Dropout(self.dropout)
+        self.dropout2 = nn.Dropout(self.dropout)
+        self.dropout3 = nn.Dropout(self.dropout)
 
     def causal_mask(self, 
                 batch_size: int, 
@@ -401,8 +318,7 @@ class TransformerDecoderBlock(nn.Module):
         return jnp.broadcast_to(mask, (batch_size, self.num_heads, destination_dim, source_dim))
 
     def __call__(self, 
-                x: jnp.ndarray, 
-                context: jnp.ndarray, 
+                x: jnp.ndarray,
                 training: bool = False) -> tuple:
         """
         Apply the DecoderBlock to input data.
@@ -416,27 +332,33 @@ class TransformerDecoderBlock(nn.Module):
         Returns:
             tuple: Output tensor, attention tensor, and cross-attention tensor.
         """
-        mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
+        mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
 
+        x = self.norm1(x)
         attended_x, attention1 = self.attention1(x, x, mask=mask)
-        x = self.add_norm1(x, attended_x, training)
+        x = self.dropout1(x, deterministic=not training)
+        x += attended_x
 
-        attended_x, attention2 = self.attention2(x, context, mask=mask)
-        x = self.add_norm2(x, attended_x, training)
+        x = self.norm2(x)
+        attended_x, attention2 = self.attention2(x, x, mask=mask)
+        x = self.dropout2(x, deterministic=not training)
+        x += attended_x
 
-        linear_output = self.feed_forward(x)
-        x = self.add_norm3(x, linear_output, training)
-        
+        x = self.norm3(x)
+        output = self.feed_forward(x)
+        x = self.dropout3(x, deterministic=not training)
+        x += output
+
         return x, jnp.array(attention1), jnp.array(attention2)
-    
 
-class TransformerDecoder(nn.Module):
+    
+class LlaMA2Decoder(nn.Module):
     """
     Transformer Decoder.
 
     Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
+        num_layers (int): Number of decoder layers.
+        hidden_dim (int): Input dimension.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
@@ -446,19 +368,14 @@ class TransformerDecoder(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
-    max_len : int
-    vocab_size : int
-    embed_dim : int
-    learned_position : bool = True
-
+    vocab_size: float
+    embed_dim: float
 
     def setup(self):
-        self.embedding = TokenAndPositionEmbedding(self.max_len,
-                                                   self.vocab_size,
-                                                   self.embed_dim,
-                                                   self.learned_position)
+        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
+                                  features=self.embed_dim)
         
-        self.layers = [TransformerDecoderBlock(self.hidden_dim, 
+        self.layers = [LlaMA2DecoderBlock(self.hidden_dim, 
                                     self.num_heads, 
                                     self.feedforward_dim, 
                                     self.dropout) for _ in range(self.num_layers)]
@@ -467,9 +384,9 @@ class TransformerDecoder(nn.Module):
         
 
     def __call__(self, 
-                 x: jnp.ndarray, 
-                 context: jnp.ndarray, 
-                 training: bool = False) -> tuple:
+                 x: jnp.ndarray,
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> tuple:
         """
         Apply the TransformerDecoder to input data.
 
@@ -487,13 +404,18 @@ class TransformerDecoder(nn.Module):
         x = self.embedding(x)
         cross_attention_maps = []
         for layer in self.layers:
-            x, attention, cross_attention = layer(x, context, training=training)
+            x, attention, cross_attention = layer(x, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
-        return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)
+
+        if not drop_last_layer:
+            x = self.outputs(x)
+
+        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
     
-    
-class Transformer(nn.Module):
+
+
+class LlaMA2(nn.Module):
     """
     Args:
         num_layers (int): Number of layers in the encoder and decoder.
@@ -520,45 +442,32 @@ class Transformer(nn.Module):
 
     def setup(self):
         """
-        Initialize the Transformer model by setting up the encoder and decoder.
+        Initialize the LlaMA model by setting up the encoder and decoder.
         """
-        self.encoder = TransformerEncoder(
-            hidden_dim=self.hidden_dim,
-            num_heads=self.num_heads,
-            num_layers=self.num_layers,
-            feedforward_dim=self.feedforward_dim,
-            dropout=self.dropout,
-            max_len=self.max_length,
-            vocab_size=self.vocab_size,
-            embed_dim=self.embed_dim,
-        )
-        
-        self.decoder = TransformerDecoder(
-            hidden_dim=self.hidden_dim,
-            num_heads=self.num_heads,
-            num_layers=self.num_layers,
-            feedforward_dim=self.feedforward_dim,
-            dropout=self.dropout,
-            max_len=self.max_length,
-            vocab_size=self.vocab_size,
-            embed_dim=self.embed_dim,
-        )
+        self.decoder = LlaMA2Decoder(self.num_layers,
+                                self.hidden_dim,
+                                self.num_heads,
+                                self.feedforward_dim,
+                                self.dropout,
+                                self.vocab_size,
+                                self.embed_dim)
         
     def __call__(self, 
                  x: jnp.ndarray,
-                 y: jnp.ndarray,
-                 training: bool = False) -> jnp.ndarray:
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> jnp.ndarray:
         
         """ 
         Sequence-to-sequence models use teacher forcing during training and as such, 
         the decoder input is the ground truth sequence.
         """
-        z = self.encoder(x=x, training=training)[0]
-        return self.decoder(x=y, context=z, training=training)[0]
+        return self.decoder(x=x, 
+                            training=training,
+                            drop_last_layer=drop_last_layer)[0]
     
 
     def generate(self, 
-                 x: jnp.ndarray,
+                 x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
         """
@@ -573,17 +482,15 @@ class Transformer(nn.Module):
         Returns:
             Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
         """
-        # Encode the input sequence
-        encoded_sequence = self.encoder(x=x, training=False)[0]
+        if x is not None:
+            assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
 
-        decoder_input = jnp.array([[self.start_token]])
+        decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
 
         # Autoregressive decoding loop
         for _ in range(self.max_length):
-            decoder_output = self.decoder(x=decoder_input,
-                                          context=encoded_sequence, 
-                                          training=False)[0]
+            decoder_output = self.decoder(decoder_input, training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -604,7 +511,7 @@ class Transformer(nn.Module):
     
 
     def generate_batch(self, 
-                 x: jnp.ndarray,
+                 x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
         """
@@ -618,17 +525,13 @@ class Transformer(nn.Module):
         Returns:
             jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
         """
-        # Encode the input sequence
-        encoded_sequence = self.encoder(x=x, training=False)[0]
 
         batch_size = x.shape[0] if x is not None else 1
-        decoder_input = jnp.full((batch_size, 1), self.start_token)
+        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
         for i in range(self.max_length):
-            decoder_output = self.decoder(x=decoder_input,
-                                          context=encoded_sequence, 
-                                          training=False)[0]
+            decoder_output = self.decoder(decoder_input, training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -649,7 +552,7 @@ class Transformer(nn.Module):
 
 
 
-class TransformerDataParallelTrainer:
+class LlaMADataParallelTrainer:
     """
     A class for training a GPT model using data parallelism.
 
@@ -664,7 +567,6 @@ class TransformerDataParallelTrainer:
     def __init__(self, 
                  model: Any, 
                  input_shape: Tuple[int, ...],
-                 target_shape: Tuple[int, ...],
                  weights_filename: str,
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
@@ -674,16 +576,15 @@ class TransformerDataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(TransformerDataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(TransformerDataParallelTrainer.evaluation_step, axis_name='devices')
-        self.state = self.create_train_state(learning_rate, input_shape, target_shape)
+        self.train_step = jax.pmap(LlaMADataParallelTrainer.train_step, axis_name='devices')
+        self.evaluation_step = jax.pmap(LlaMADataParallelTrainer.evaluation_step, axis_name='devices')
+        self.state = self.create_train_state(learning_rate, input_shape)
         print(f'Number of accelerators: {self.num_devices}')
     
 
     def create_train_state(self, 
                            learning_rate: float, 
-                           input_shape: Tuple[int, ...],
-                           target_shape: Tuple[int, ...]) -> Any:
+                           input_shape: Tuple[int, ...]) -> Any:
         """
         Creates and initializes the training state for the model.
 
@@ -697,8 +598,7 @@ class TransformerDataParallelTrainer:
         """
         rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
         params = self.model.init(rngs, 
-                                 jnp.ones(input_shape, dtype=jnp.int32), 
-                                 jnp.ones(target_shape, dtype=jnp.int32))['params']
+                                 jnp.ones(input_shape, dtype=jnp.int32))['params']
 
         if self.params_path is not None:
             params = self.load_params(self.params_path)
@@ -726,8 +626,7 @@ class TransformerDataParallelTrainer:
         """
         def loss_fn(params):
             logits = state.apply_fn({'params': params}, 
-                                    inputs, 
-                                    targets,
+                                    inputs,
                                     training=True,
                                     rngs={'dropout': jax.random.PRNGKey(int(time.time()))})
             return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
@@ -788,7 +687,7 @@ class TransformerDataParallelTrainer:
         Returns:
             A tuple of the updated state and the loss value for this step.
         """
-        logits = state.apply_fn({'params': state.params}, inputs, targets,  rngs={'dropout': jax.random.PRNGKey(2)})
+        logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})
         return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
 
     def evaluate(self, 
@@ -823,7 +722,7 @@ class TransformerDataParallelTrainer:
             pickle.dump(self.state.params, f)
 
     @staticmethod
-    def load_params(self, filename: str) -> Any:
+    def load_params(filename: str) -> Any:
         """
         Loads the model parameters from a file.
 
@@ -836,3 +735,56 @@ class TransformerDataParallelTrainer:
         with open(filename, 'rb') as f:
             params = pickle.load(f)
         return params
+    
+
+from llama import *
+
+# Dummy data parameters
+batch_size = 8
+max_length = 51
+vocab_size = 1000 
+embed_dim = 256 
+
+# Generate data
+data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+dummy_inputs = data[:, :-1]
+dummy_targets = data[:, 1:]
+
+# model parameters
+hyperparams = {
+    'num_layers': 1,
+    'hidden_dim': 256,
+    'num_heads': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.1,
+    'vocab_size': 1000,
+    'embed_dim': 256,
+    'max_length': max_length,
+    'start_token': 0,
+    'end_token': 50,
+}
+
+# Initialize model
+model = LlaMA2(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs)['params']
+outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+print(outputs.shape)
+
+# Training on your data
+dataloader = [(dummy_inputs, dummy_targets)] * 10
+trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+
+# Generate: should always have dims (1, seq_len)
+input_sequence = jnp.array([[145, 656]])
+print(input_sequence.shape)
+
+#params = trainer.load_params('params.pkl')
+outputs = model.apply({'params': params},
+                      input_sequence, 
+                      rngs={'dropout': jax.random.PRNGKey(2)}, 
+                      method=model.generate)
+
+print(outputs)

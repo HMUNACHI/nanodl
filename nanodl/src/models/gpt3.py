@@ -14,8 +14,6 @@ Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10
 
 example usage:
 ```
-from gpt3 import *
-
 # Dummy data parameters
 batch_size = 8
 max_length = 51
@@ -55,11 +53,10 @@ trainer.train(dataloader, num_epochs=2)
 print(trainer.evaluate(dataloader))
 
 # Generate: should always have dims (batch_size, seq_len)
-start_tokens = jnp.array([[123, 456], [145, 656]])
+start_tokens = jnp.array([[123, 456]])
 
-params = trainer.load_params('params.pkl')
+# params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
-                      start_tokens, 
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
                       method=model.generate)
 
@@ -291,7 +288,6 @@ class GPT3Decoder(nn.Module):
     vocab_size: float
     embed_dim: float
 
-
     def setup(self):
         self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
                                   features=self.embed_dim)
@@ -307,7 +303,8 @@ class GPT3Decoder(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray,
                  mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
+                 training: bool = False,
+                 drop_last_layer: bool = False) -> tuple:
         """
         Apply the TransformerDecoder to input data.
 
@@ -327,7 +324,11 @@ class GPT3Decoder(nn.Module):
             x, attention, cross_attention = layer(x, mask=mask, training=training)
             attention_maps.append(attention)
             cross_attention_maps.append(cross_attention)
-        return self.outputs(x), jnp.array(attention_maps), jnp.array(cross_attention_maps)
+
+        if not drop_last_layer:
+            x = self.outputs(x)
+            
+        return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
     
 
 class GPT3(nn.Module):
@@ -373,13 +374,16 @@ class GPT3(nn.Module):
         
     def __call__(self, 
                  x: jnp.ndarray,
-                 training: bool = True) -> jnp.ndarray:
+                 training: bool = True,
+                 drop_last_layer: bool = False) -> jnp.ndarray:
         
         """ 
         Causal models are trained differently, the outputs are just the inputs shifted by 1
         While the generation is autoregressve, hence a different function for that
         """
-        return self.decoder(x=x, training=training)[0]
+        return self.decoder(x=x, 
+                            training=training,
+                            drop_last_layer=drop_last_layer)[0]
 
 
     def generate(self, 
@@ -398,7 +402,9 @@ class GPT3(nn.Module):
         Returns:
             Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
         """
-
+        if x is not None:
+            assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
+            
         decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
 
@@ -416,7 +422,6 @@ class GPT3(nn.Module):
 
             next_token = next_token[0]
             output_sequence.append(next_token.item())
-            print(decoder_input.shape, jnp.array([[next_token]]).shape)
             decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
 
             if next_token.item() == self.end_token:
