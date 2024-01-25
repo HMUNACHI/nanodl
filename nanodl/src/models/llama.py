@@ -31,6 +31,7 @@ hyperparams = {
     'max_length': max_length,
     'start_token': 0,
     'end_token': 50,
+    'num_groups': 2
 }
 
 # Initialize model

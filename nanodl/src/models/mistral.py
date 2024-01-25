@@ -52,18 +52,6 @@ dataloader = [(dummy_inputs, dummy_targets)] * 10
 trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
-
-# Generate: should always have dims (1, seq_len)
-input_sequence = jnp.array([[145, 656]])
-print(input_sequence.shape)
-
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      input_sequence, 
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-
-print(outputs)
 ```
 '''
 
@@ -183,7 +171,7 @@ class RotaryPositionalEncoding():
 
 class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
     """
-    Attention which uses RoPE (Rotary Positional Encoding)
+    Attention which uses RoPE, Grouped Query and Sliding Window Attention.
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
@@ -1185,58 +1173,3 @@ class MistralDataParallelTrainer:
         with open(filename, 'rb') as f:
             params = pickle.load(f)
         return params
-    
-
-# Dummy data parameters
-batch_size = 8
-max_length = 50
-vocab_size = 1000 
-embed_dim = 256 
-
-# Generate data
-data = jnp.arange(batch_size * (max_length+1), dtype=jnp.int32).reshape((batch_size, max_length+1))
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-print(dummy_inputs.shape, dummy_targets.shape)
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'num_groups': 2,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-    'window_size': 5,
-    'shift_size': 2
-}
-
-# Initialize model
-model = Mistral(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
-print(outputs.shape)
-
-# Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
-
-# Generate: should always have dims (1, seq_len)
-input_sequence = jnp.array([[145, 656]])
-print(input_sequence.shape)
-
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      input_sequence, 
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-
-print(outputs)
