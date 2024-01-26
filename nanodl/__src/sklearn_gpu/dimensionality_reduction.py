@@ -26,16 +26,13 @@ class PCA:
 
     Example Usage:
         # Create an instance of the PCA class
+        data = jax.random.normal(jax.random.key(0), (1000, 10))
         pca = PCA(n_components=2)
-
-        # Fit the PCA model on the dataset
         pca.fit(data)
-
-        # Transform the dataset into the PCA space
         transformed_data = pca.transform(data)
-
-        # Optionally, inverse transform the data back to the original space
         original_data = pca.inverse_transform(transformed_data)
+        X_sampled = pca.sample(n_samples=1000, key=None)
+        print(X_sampled.shape, original_data.shape, transformed_data.shape)
     """
 
     def __init__(self,
@@ -115,11 +112,3 @@ class PCA:
         z = jax.random.normal(key, (n_samples, self.n_components))
         X_sampled = self.inverse_transform(z)
         return X_sampled
-    
-
-
-# svd
-    
-# tsne 
-    
-# 
