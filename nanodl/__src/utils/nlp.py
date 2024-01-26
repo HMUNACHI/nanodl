@@ -6,42 +6,6 @@ from collections import Counter
 from typing import Dict, Any, Union, List
 
 
-def zero_pad(arr: jnp.array, 
-             max_length: int) -> jnp.array:
-    """
-    Zero-pad the given array to the specified maximum length along axis=1.
-
-    This function pads the input array with zeros along the second dimension (axis=1) 
-    until it reaches the specified maximum length. If the array is already longer 
-    than the maximum length, it is returned as is.
-
-    Args:
-        arr (jax.numpy.ndarray): The array to be padded. Must be 2-dimensional.
-        max_length (int): The maximum length to pad the array to along axis=1.
-
-    Returns:
-        jax.numpy.ndarray: The zero-padded array.
-
-    Example usage:
-        >>> arr = jnp.array([[1, 2, 3], [4, 5, 6]])
-        >>> max_length = 5
-        >>> padded_arr = zero_pad(arr, max_length)
-        >>> print(padded_arr)
-        [[1 2 3 0 0]
-         [4 5 6 0 0]]
-    """
-    current_length = arr.shape[1] 
-    num_zeros = max_length - current_length 
-
-    if num_zeros > 0:
-        zeros = jnp.zeros((arr.shape[0], num_zeros), dtype=arr.dtype)
-        padded_array = jnp.concatenate([arr, zeros], axis=1)
-    else:
-        padded_array = arr
-
-    return padded_array
-
-
 def rouge(hypotheses: List[str], 
           references: List[str], 
           ngram_sizes: List[int] = [1, 2]) -> dict:
