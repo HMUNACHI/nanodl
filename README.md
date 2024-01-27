@@ -1,6 +1,6 @@
-<div align="center">
-![Alt text](assets/logo.png)
-</div>
+<p align="center">
+  <img src="assets/logo.png" alt="Alt text"/>
+</p>
 
 # NanoDL: A Jax-based library for desinging and training transformer models.
 
