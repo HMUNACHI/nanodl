@@ -2,9 +2,9 @@
   <img src="assets/logo-2.jpg" alt="Alt text"/>
 </p>
 
-# NanoDL: A Jax-based library for desinging and training transformer models.
+# A Jax-based library for designing and training transformer models from scratch.
 
-![Build](https://github.com/google/nanodl/workflows/Build/badge.svg?branch=main) [![coverage](https://badgen.net/codecov/c/gh/google/nanodl)](https://codecov.io/gh/google/nanodl)
+![License](https://img.shields.io/github/license/hmunachi/nanodl?style=flat-square) ![Stars](https://img.shields.io/github/stars/hmunachi/nanodl?style=social) ![Forks](https://img.shields.io/github/forks/hmunachi/nanodl?style=social) ![Issues](https://img.shields.io/github/issues/hmunachi/nanodl?style=flat-square)
 
 
 [**Overview**](#overview)
@@ -18,12 +18,11 @@ Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Nd
 
 ## Overview
 
-Why NanoDL?
-Building and training transformer-based models require significant time and resource commitment, yet AI/ML experts many times need to implement scratch versions of this at less scale for unique problems. Jax is a powerful, yet low-resource framework for developing much faster neural networks. Available resources for developing transformers do not fully support this framework and there are many dependencies between files in their source codes. NanoDL hosts various state-of-the-art models like LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Mixers, Diffusion, Whisper, ViT, Mixers, CLIP, GAT and vanilla Transformers. It also provide unique dataparallel distributed trainers for each, as well as various layers for custom model development such as RoPE, GQA, MQA, Relative Attention, Shifted Window Attention, patch embeddings, etc. All model files were written to be independent so developers can simply download/copy and run.
+Developing and training transformer-based models is typically resource-intensive and time-consuming. AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge by offering a range of advanced models such as LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Mixers, Diffusion, Whisper, ViT, CLIP, GAT, and standard Transformers. It provides unique dataparallel distributed trainers and various custom development layers like RoPE, GQA, MQA, Relative Attention, SWin attention, Patch Embedding and more. Importantly, all model files in NanoDL are independent, allowing developers to easily download/copy, and use them.
 
-Furthermore, Scikit Learn is a powerful and immensley popular tool for developing classical ML models, but it still lacks GPU/TPU access by itself for high-load computations. NanoDL also provides GPU/TPU-accelerated models like PCA, KMeans, Gaussian Mixed Models, Linear/Logistic Regressions, Gaussian Processes, Naive Bayes etc., via Jax.NumPy(). 
+Additionally, while Scikit Learn is widely used for classical ML model development, it lacks native GPU/TPU support for intensive computations. NanoDL fills this gap by offering GPU/TPU-accelerated models such as PCA, KMeans, Gaussian Mixed Models, and others, using Jax.NumPy().
 
-Finally, NLP and Computer Vision problems often require auxillary algorithms for preprocessing and evaluation. NanoDL also provides these algorithms, including dataloaders. Pretrained weights are currently not provided as NanoDL was created for building from scratch, please refer to HuggingFace for such. 
+For NLP and Computer Vision applications, NanoDL provides essential auxiliary algorithms, including dataloaders, for preprocessing and evaluation. However, it's important to note that NanoDL is designed for building models from scratch and does not provide pretrained weights. Users seeking pretrained models should refer to resources like HuggingFace. 
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
