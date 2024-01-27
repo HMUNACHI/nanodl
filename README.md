@@ -1,49 +1,247 @@
+<div align="center">
+![Alt text](/assets/logo-1.jpg)
+</div>
 
-![Alt text](/assets/logo.png)
+# NanoDL: A Jax-based library for desinging and training transformer models.
+
+![Build](https://github.com/google/nanodl/workflows/Build/badge.svg?branch=main) [![coverage](https://badgen.net/codecov/c/gh/google/nanodl)](https://codecov.io/gh/google/nanodl)
 
 
-Welcome to the Jax-Models repository! This repository is a curated collection of deep learning concepts, models, algorithms, and more, all implemented from scratch using JAX, a powerful numerical computing library. Our goal is to provide a comprehensive resource for both beginners and experienced practitioners in the field of artificial intelligence. The codes are designed for easy copy and paste, and we try to be as detailed as possible in the documentation. Each implementation will be roll out once all tests are passed, watch and star to keep up!
+[**Overview**](#overview)
+| [**Quick install**](#quick-install)
+| [**What does NanoDL look like?**](#what-does-nanodl-look-like)
+| [**Documentation**](https://nan.readthedocs.io/)
 
-# Authors
-Henry Ndubuaku\
-ndubuakuhenry@gmail.com\
-[Linkedin](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/)
+This README is a very short intro. **To learn everything you need to know about nanodl, refer to our [full documentation](https://nanodl.readthedocs.io/).**
 
-## Contents
+Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) from 2022, and is now developed jointly with the open source community.
 
-The repository covers a wide range of topics, including:
+## Overview
 
-- **Deep Learning Concepts**: Explore various attention mechanisms (Multi-Head, Multi-Query, Relative, Gated, Hierarchical, Local, Rotary etc.), positional encoding variants (Sinusoidal, Learned, Rotary, etc.), and other foundational concepts.
+Why NanoDL?
+Building and training transformer-based models require significant time and resource commitment, yet AI/ML experts many times need to implement scratch versions of this at less scale for unique problems. Jax is a powerful, yet low-resource framework for developing much faster neural networks. Available resources for developing transformers do not fully support this framework and there are many dependencies between files in their source codes. NanoDL hosts various state-of-the-art models like LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Mixers, Diffusion, Whisper, ViT, Mixers, CLIP, GAT and vanilla Transformers. It also provide unique dataparallel distributed trainers for each, as well as various layers for custom model development such as RoPE, GQA, MQA, Relative Attention, Shifted Window Attention, patch embeddings, etc. All model files were written to be independent so developers can simply download/copy and run.
 
-- **Model Implementations**: Discover implementations of state-of-the-art models such as T5, LaMDA, FLAN, GPT, InstructGPT, Llama, SeamlesM4T, Clip, Starcoder, CodeLlama, MLP-Mixers, Whisper, ViT, Swin and more. Each model is accompanied by detailed documentation for ease of understanding.
+Furthermore, Scikit Learn is a powerful and immensley popular tool for developing classical ML models, but it still lacks GPU/TPU access by itself for high-load computations. NanoDL also provides GPU/TPU-accelerated models like PCA, KMeans, Gaussian Mixed Models, Linear/Logistic Regressions, Gaussian Processes, Naive Bayes etc., via Jax.NumPy(). 
 
-- **Distributed Trainers**: Learn about different distributed training techniques for tasks like CausalLM, Seq2Seq, Contrastive, Reinforcement, Adversarial, Diffusion, and more.
+Finally, NLP and Computer Vision problems often require auxillary algorithms for preprocessing and evaluation. NanoDL also provides these algorithms, including dataloaders. Pretrained weights are currently not provided as NanoDL was created for building from scratch, please refer to HuggingFace for such. 
 
-- **Advanced Algorithms**: Dive into the implementation details of algorithms like Gaussian processes, Mixture of Experts (MoE), Principal Component Analysis, Gaussian Mixture models (GMM), KMeans decoding strategies, knowledge graphs, vocabulary tries, Jaccard, Hamming, Entropy &  evaluation algorithms and more.
+Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
-- **Mathematical Foundations**: Explore mathematical concepts crucial to deep learning, including Newton Methods, Secant, Taylor Series, Eigen Decomposition, SVD, Probability Calculators & Distributions, Bayesian methods, Monte Carlo simulations, Numerical Integrals & Derivatives Calculators, and other fundamental principles.
+## Quick install
 
-- **Data Classes**: We include managed memory-efficient Data classes for Seq2Seq, CausalLM, Classification, Unsupervised etc.Simply instantiate the class with you directory/bucket with list of ".txt" files and it will complete the process from corpus creation, BPE-based tokenizer, splitting etc. The object would finally have train_loader, val_loader and tokenizer attributes.
+You will need Python 3.6 or later, and working [JAX](https://github.com/google/jax/blob/main/README.md)
+installation, [FLAX](https://github.com/google/flax/blob/main/README.md)
+installation, [OPTAX](https://github.com/google-deepmind/optax/blob/main/README.md)
+installation (with GPU support for running training, without can only support creations).
+For a CPU-only version of JAX:
+
+```
+pip install --upgrade pip # To support manylinux2010 wheels.
+pip install --upgrade jax jaxlib flax optax # CPU-only
+```
+
+Then, install nanodl from PyPi:
+
+```
+pip install nanodl
+```
+
+## What does nanodl look like?
+
+We provide various examples using the nanodl API: language, vision and audio, starting with an LLM.
+
+```py
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import GPT4, GPTDataParallelTrainer
+
+# Generate dummy data
+batch_size = 8
+max_length = 51
+data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+# Shift to create next-token prediction dataset
+dummy_inputs = data[:, :-1]
+dummy_targets = data[:, 1:]
+
+# Create dataset and dataloader
+dataset = ArrayDataset(dummy_inputs, dummy_targets)
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
+
+# How to loop through dataloader
+for batch in dataloader:
+    x, y = batch
+    print(x.shape, y.shape)
+
+# model parameters
+hyperparams = {
+    'num_layers': 1,
+    'hidden_dim': 256,
+    'num_heads': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.1,
+    'vocab_size': 1000,
+    'embed_dim': 256,
+    'max_length': max_length,
+    'start_token': 0,
+    'end_token': 50,
+}
+
+# Initialize model
+model = GPT4(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs)['params']
+
+# You call as you would a Jax/Flax model
+outputs = model.apply(params, dummy_inputs, rngs)
+print(outputs.shape)
+
+# Training on data
+trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+trainer.train(dataloader, num_epochs=2)
+print(trainer.evaluate(dataloader))
+
+# Generating from a start token
+# Should always have dims (batch_size, seq_len)
+# Use 'generate_batch' method for generating in batches
+start_tokens = jnp.array([[123, 456]])
+
+# Remember to load the trained parameter 
+params = trainer.load_params('params.pkl')
+outputs = model.apply({'params': params},
+                      rngs={'dropout': jax.random.PRNGKey(2)}, 
+                      method=model.generate)
+print(output)
+```
+Vision example
+```py
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import DiffusionModel, DiffusionDataParallelTrainer
+
+image_size = 32
+block_depth = 2
+batch_size = 8
+widths = [32, 64, 128]
+key = jax.random.PRNGKey(0)
+input_shape = (101, image_size, image_size, 3)
+images = jax.random.normal(key, input_shape)
+
+# Create dataset and dataloader
+dataset = ArrayDataset(images) 
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False) 
+
+# Create diffusion model
+diffusion_model = DiffusionModel(image_size, widths, block_depth)
+params = diffusion_model.init(key, images)
+pred_noises, pred_images = diffusion_model.apply(params, images)
+print(pred_noises.shape, pred_images.shape)
+
+# Training on your data
+# Note: saved params are often different from training weights, use the saved params for generation
+trainer = DiffusionDataParallelTrainer(diffusion_model, images.shape, 'params.pkl')
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+
+# Generate some samples
+generated_images = diffusion_model.apply(params, 
+                                         num_images=5, 
+                                         diffusion_steps=5, 
+                                         method=diffusion_model.generate)
+print(generated_images.shape)
+```
+
+Audio Sample
+```py
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import Whisper, WhisperDataParallelTrainer
+
+# Dummy data parameters
+batch_size = 8
+max_length = 50
+embed_dim = 256 
+vocab_size = 1000 
+
+# Generate data
+dummy_targets = jnp.ones((101, max_length), dtype=jnp.int32)
+dummy_inputs = jnp.ones((101, max_length, embed_dim))
+
+# Create dataset and dataloader
+dataset = ArrayDataset(dummy_inputs, dummy_targets)
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
+
+# model parameters
+hyperparams = {
+    'num_layers': 1,
+    'hidden_dim': 256,
+    'num_heads': 2,
+    'feedforward_dim': 256,
+    'dropout': 0.1,
+    'vocab_size': 1000,
+    'embed_dim': embed_dim,
+    'max_length': max_length,
+    'start_token': 0,
+    'end_token': 50,
+}
+
+# Initialize model
+model = Whisper(**hyperparams)
+rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+params = model.init(rngs, dummy_inputs, dummy_targets)['params']
+outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs)
+print(outputs.shape)
+
+# Training on your data
+trainer = WhisperDataParallelTrainer(
+  model, 
+  dummy_inputs.shape,
+  dummy_targets.shape, 
+  'params.pkl'
+  )
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+```
+
+PCA example
+```py
+from nanodl import PCA
+
+data = jax.random.normal(jax.random.key(0), (1000, 10))
+pca = PCA(n_components=2)
+pca.fit(data)
+transformed_data = pca.transform(data)
+original_data = pca.inverse_transform(transformed_data)
+X_sampled = pca.sample(n_samples=1000, key=None)
+print(X_sampled.shape, original_data.shape, transformed_data.shape)
+```
 
 # Contribution
-Contributions are highly encouraged! If you'd like to contribute to this repository, feel free to fork the repository, make your changes, and submit a pull request. Please ensure that your contributions align with the repository's focus on educational implementations and comprehensive documentation. If you have a problem, please use the discussion section.
 
-## Future
-We are committed to the continuous growth and enrichment of the Jax-Models repository. Here's a glimpse of what's on the horizon:
+This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Feel free to fork the repository, create a branch, make your changes, and submit a pull request. Please ensure that your contributions align with the repository's design patterns. If you have a problem, please use the discussion section. Contributions can be made in the form of writing docs, fixing bugs, implementing papers, writing high-coverage tests, experimenting and submitting real-world examples to the examples section, reporting bugs, or responding to reported issues.
 
-- **Interactive Notebooks**: Expect interactive Jupyter notebooks that bring theoretical concepts to life through hands-on examples.
+## Citing nanodl
 
-- **Deployment Scripts**: Simplify the deployment of models and algorithms with ready-to-use scripts, making implementation more accessible.
+To cite this repository:
 
-- **Python Library**: The potential for packaging select components as a Python library, enhancing the ease of integration into your projects.
-
-- **More Algorithms**: More algorithms will be implemented as papers drop, enriching the repository's offerings and enhancing your AI toolkit.
-
-- **Community Contributions**: We look forward to welcoming contributions from the community, enhancing the repository's depth and breadth.
-
-Stay tuned for these exciting updates as we work to make Jax-Models an even more valuable resource for AI enthusiasts and learners.
-
-# Sponsorship & Collaboration
-Interested in becoming a sponsor or a collaboration/partnership? Reach out to us at ndubuakuhenry@gmail.com for partnership opportunities and collaboration. Your support enables us to continue providing high-quality educational resources to the AI community.
-
-Happy learning and coding!
+```
+@software{nanodl2020github,
+  author = {{H}enry Ndubuaku},
+  title = {{N}anoDL: A neural network library and ecosystem for {JAX}},
+  url = {http://github.com/hmunachi/nanodl},
+  version = {0.1.0},
+  year = {2024},
+}
+```
