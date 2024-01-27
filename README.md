@@ -14,9 +14,7 @@
 | [**What does NanoDL look like?**](#what-does-nanodl-look-like)
 | [**Documentation**](https://nan.readthedocs.io/)
 
-This README is a very short intro. **To learn everything you need to know about nanodl, refer to our [full documentation](https://nanodl.readthedocs.io/).**
-
-Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) from 2022, and is now developed jointly with the open source community.
+Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) since 2022, and is now developed jointly with the open source community.
 
 ## Overview
 
@@ -241,8 +239,8 @@ To cite this repository:
 
 ```
 @software{nanodl2020github,
-  author = {{H}enry Ndubuaku},
-  title = {{N}anoDL: A neural network library and ecosystem for {JAX}},
+  author = {Henry Ndubuaku},
+  title = {NanoDL: A Jax-based library for designing and training transformer models from scratch.},
   url = {http://github.com/hmunachi/nanodl},
   version = {0.1.0},
   year = {2024},
