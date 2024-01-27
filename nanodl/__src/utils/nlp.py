@@ -202,8 +202,8 @@ def cider_score(hypothesis: str,
     Example usage:
         >>> hypothesis = "the cat is on the mat"
         >>> reference = "the cat sits on the mat"
-        >>> cider_score = cider_score(hypothesis, reference)
-        >>> print(cider_score)
+        >>> score = cider_score(hypothesis, reference)
+        >>> print(score)
     """
     def tokenize(sentence):
         return re.findall(r'\w+', sentence.lower())

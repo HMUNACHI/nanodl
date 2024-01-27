@@ -2,7 +2,7 @@
 
 Example usage:
 ```
-from diffussion import *
+from diffusion import *
 
 key = jax.random.PRNGKey(0)
 image_size = 32

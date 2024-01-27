@@ -40,7 +40,7 @@ clip_params = {
 }
 
     # Initialize CLIP model
-    clip_model = Clip(**clip_params)
+    clip_model = CLIP(**clip_params)
     rng = jax.random.PRNGKey(0)
     params = clip_model.init(rng, dummy_texts, dummy_images)['params']
     loss = clip_model.apply({'params': params}, dummy_texts, dummy_images)
@@ -449,7 +449,7 @@ class ImageEncoder(nn.Module):
         return x, jnp.array(attention_maps)
     
 
-class Clip(nn.Module):
+class CLIP(nn.Module):
     """
     CLIP (Contrastive Language-Image Pretraining) model.
 
