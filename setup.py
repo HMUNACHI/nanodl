@@ -11,10 +11,10 @@ setup(
     url='https://github.com/hmunachi/nanodl',
     packages=find_packages(),
     install_requires=[
-        'flax==0.7.5',
-        'jax==0.4.23',
-        'jaxlib==0.4.23',
-        'optax==0.1.8',
+        'flax',
+        'jax',
+        'jaxlib',
+        'optax',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',

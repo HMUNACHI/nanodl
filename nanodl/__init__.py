@@ -268,3 +268,42 @@ __all__ = [
     "random_flip_image",
     "sobel_edge_detection"
 ]
+
+import importlib
+import sys
+
+def check_library_installed(lib_name):
+    try:
+        return importlib.import_module(lib_name)
+    except ImportError:
+        raise ImportError(f"{lib_name} is not installed or improperly installed.")
+
+def test_flax(flax):
+    model = flax.linen.Dense(features=10)
+
+def test_jax(jax):
+    arr = jax.numpy.array([1, 2, 3])
+    result = jax.numpy.sum(arr)
+
+def test_optax(optax):
+    optimizer = optax.sgd(learning_rate=0.1)
+
+def main():
+    try:
+        flax = check_library_installed('flax')
+        jax = check_library_installed('jax')
+        optax = check_library_installed('optax')
+
+        test_flax(flax)
+        test_jax(jax)
+        test_optax(optax)
+
+    except ImportError as e:
+        print(e)
+        sys.exit(1)
+    except Exception as e:
+        print(f"An error occurred while verifying Jax/Flax/Optax installation: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

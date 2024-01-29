@@ -277,9 +277,28 @@ Contributions can be made in various forms:
 - Fixing bugs.
 - Implementing papers.
 - Writing high-coverage tests.
+- OPtimizing existing codes.
 - Experimenting and submitting real-world examples to the examples section.
 - Reporting bugs.
 - Responding to reported issues.
+
+Coming features include:
+- Reinforcement Learning With Human Feedback (RLHF).
+- Tokenizers.
+- Code optimisations.
+
+To follow up or share thoughts, follow [here](https://forms.gle/vwveb9SKdPYywHx9A)
+
+## Sponsorships
+
+The name "NanoDL" stands for Nano Deep Learning. Following the success of Phi models, 
+the long-term goal is to build and train nano versions of all available models,
+while ensuring they compete with the original models in performance, while limiting 
+the number of parameters at 1B. Models are exploding in size, therefore gate-keeping 
+experts and companies with limited resources, there is a need to remedy this.
+Trained weights will be made available via this library, as well as Huggingface.
+Any form of sponsorship, funding, grants or contribution will help with training resources.
+You can sponsor via the tag on the user profile, or reach out via ndubuakuhenry@gmail.com.
 
 ## Citing nanodl
 
