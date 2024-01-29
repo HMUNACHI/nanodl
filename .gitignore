@@ -15,6 +15,9 @@ Thumbs.db
 /build/
 /dist/
 /node_modules/
+/.venv/
+/nanodl.egg-info/
+__pycache__/
 
 # Ignore configuration files with sensitive information
 config.ini

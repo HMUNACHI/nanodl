@@ -10,7 +10,10 @@ offering promising avenues for future research and applications in computer visi
 
 Example usage:
 ```
-from vit import *
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import ViT, ViTDataParallelTrainer
 
 # Dummy data parameters
 batch_size = 8
@@ -22,7 +25,19 @@ patch_size = (16, 16)
 # Generate data
 dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
 key = jax.random.PRNGKey(10)
-dummy_labels = jax.random.randint(key, shape=(batch_size,), minval=0, maxval=n_outputs-1)
+dummy_labels = jax.random.randint(key, 
+                                shape=(batch_size,), 
+                                minval=0, 
+                                maxval=n_outputs-1)
+
+# Create dataset and dataloader
+dataset = ArrayDataset(dummy_inputs, 
+                       dummy_labels)
+
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
 
 # model parameters
 hyperparams = {
@@ -43,17 +58,15 @@ outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
 print(outputs.shape)
 
 # Training on your data
-dataloader = [(dummy_inputs, dummy_labels)] * 10
 trainer = ViTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
 trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
 ```
 '''
 
 import jax
 import time
+import flax
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
@@ -415,6 +428,7 @@ class ViTDataParallelTrainer:
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -559,21 +573,16 @@ class ViTDataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
-            pickle.dump(self.state.params, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    def load_params(self, filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params

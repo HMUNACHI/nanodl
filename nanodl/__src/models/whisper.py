@@ -9,7 +9,10 @@ https://cdn.openai.com/papers/whisper.pdf
 
 Example usage:
 ```
-from whisper import *
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import Whisper, WhisperDataParallelTrainer
 
 # Dummy data parameters
 batch_size = 8
@@ -17,9 +20,23 @@ max_length = 50
 embed_dim = 256 
 vocab_size = 1000 
 
-# Generate data
-dummy_targets = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
-dummy_inputs = jnp.ones((batch_size, max_length, embed_dim))
+# Generate data: replace with actual tokenised/quantised data
+dummy_targets = jnp.ones((101, max_length), dtype=jnp.int32)
+dummy_inputs = jnp.ones((101, max_length, embed_dim))
+
+dataset = ArrayDataset(dummy_inputs, 
+                       dummy_targets)
+
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
+
+# How to loop through dataloader
+for batch in dataloader:
+    x, y = batch
+    print(x.shape, y.shape)
+    break
 
 # model parameters
 hyperparams = {
@@ -43,17 +60,29 @@ outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs
 print(outputs.shape)
 
 # Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
-trainer = WhisperDataParallelTrainer(model, dummy_inputs.shape, dummy_targets.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
+trainer = WhisperDataParallelTrainer(model, 
+                                     dummy_inputs.shape, 
+                                     dummy_targets.shape, 
+                                     'params.pkl')
+trainer.train(dataloader, 2, dataloader)
+
+# Sample inference
+params = trainer.load_params('params.pkl')
+
+# for more than one sample, use model.generate_batch
+transcripts = model.apply({'params': params}, 
+                          dummy_inputs[:1], 
+                          rngs=rngs, 
+                          method=model.generate)
+
+print(transcripts)
 ```
 '''
 
 import jax
+import flax
 import time
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
@@ -441,7 +470,7 @@ class WhisperTextDecoderBlock(nn.Module):
         """
         mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
 
-        attended_x, attention1 = self.attention1(x, x, mask=mask)
+        attended_x, attention1 = self.attention1(x, x)
         x = self.add_norm1(x, attended_x, training)
 
         attended_x, attention2 = self.attention2(x, context, mask=mask)
@@ -576,7 +605,6 @@ class Whisper(nn.Module):
         z = self.encoder(x=x, training=training)[0]
         return self.decoder(x=y, context=z, training=training)[0]
     
-
     def generate(self, 
                  x: jnp.ndarray,
                  temperature: float = 1.0,
@@ -620,7 +648,7 @@ class Whisper(nn.Module):
             if next_token.item() == self.end_token:
                 break
 
-        return tuple(output_sequence)
+        return jnp.array(output_sequence)
     
 
     def generate_batch(self, 
@@ -646,7 +674,7 @@ class Whisper(nn.Module):
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
         for i in range(self.max_length):
-            decoder_output = self.decoder(x=decoder_input,
+            decoder_output = self.decoder(decoder_input,
                                           context=encoded_sequence, 
                                           training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
@@ -689,6 +717,7 @@ class WhisperDataParallelTrainer:
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -837,21 +866,16 @@ class WhisperDataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
-            pickle.dump(self.state.params, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    def load_params(self, filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params

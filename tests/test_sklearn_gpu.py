@@ -35,13 +35,13 @@ class TestKClustering(unittest.TestCase):
         kmeans = KMeans(k=self.k)
         kmeans.fit(self.X)
         clusters = kmeans.predict(self.X)
-        self.assertEqual(len(set(clusters)), self.k)
+        self.assertEqual(len(set(clusters.tolist())), self.k)
 
     def test_gmm_fit_predict(self):
         gmm = GaussianMixtureModel(n_components=self.k)
         gmm.fit(self.X)
         labels = gmm.predict(self.X)
-        self.assertEqual(len(set(labels)), self.k)
+        self.assertEqual(len(set(labels.tolist())), self.k)
 
 
 class TestPCA(unittest.TestCase):
@@ -79,7 +79,7 @@ class TestRegression(unittest.TestCase):
         lr_model.train(x_data, y_data)
         learned_weights, learned_bias = lr_model.get_params()
         self.assertTrue(jnp.allclose(learned_weights, jnp.array([[2.0]]), atol=1e-1))
-        self.assertTrue(jnp.allclose(learned_bias, jnp.array([[-1.0]]), atol=1e-1))
+        self.assertTrue(jnp.allclose(learned_bias, jnp.array([[1.0]]), atol=1e-1))
 
     def test_logistic_regression(self):
         num_samples = 100

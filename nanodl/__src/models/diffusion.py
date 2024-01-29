@@ -2,40 +2,55 @@
 
 Example usage:
 ```
-from diffusion import *
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import DiffusionModel, DiffusionDataParallelTrainer
 
-key = jax.random.PRNGKey(0)
 image_size = 32
-widths = [32, 64, 128]
 block_depth = 2
-input_shape = (3, image_size, image_size, 3)
+batch_size = 8
+widths = [32, 64, 128]
+key = jax.random.PRNGKey(0)
+input_shape = (101, image_size, image_size, 3)
 images = jax.random.normal(key, input_shape)
 
+# Use your own images
+dataset = ArrayDataset(images) 
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False) 
+
+# Create diffusion model
 diffusion_model = DiffusionModel(image_size, widths, block_depth)
 params = diffusion_model.init(key, images)
 pred_noises, pred_images = diffusion_model.apply(params, images)
 print(pred_noises.shape, pred_images.shape)
 
-image_generator = DiffusionImageGenerator(diffusion_model, params)
-generated_images = diffusion_model.apply(params, 
+# Training on your data
+# Note: saved params are often different from training weights, use the saved params for generation
+trainer = DiffusionDataParallelTrainer(diffusion_model, 
+                                       input_shape=images.shape, 
+                                       weights_filename='params.pkl', 
+                                       learning_rate=1e-4)
+trainer.train(dataloader, 10, dataloader)
+print(trainer.evaluate(dataloader))
+
+# Generate some samples
+params = trainer.load_params('params.pkl')
+generated_images = diffusion_model.apply({'params': params}, 
                                          num_images=5, 
                                          diffusion_steps=5, 
                                          method=diffusion_model.generate)
 print(generated_images.shape)
-
-# Training on your data
-# Note: saved params are often different from training weights, use the saved params for generation
-dataloader = [(images)] * 10
-trainer = DiffusionDataParallelTrainer(diffusion_model, images.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
 ```
 """
 
 import jax
+import flax
 import time
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 
@@ -369,9 +384,10 @@ class DiffusionDataParallelTrainer:
                  model: Any, 
                  input_shape: Tuple[int, ...],
                  weights_filename: str,
-                 learning_rate: float = 1e-5,
+                 learning_rate: float = 1e-4,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -451,6 +467,7 @@ class DiffusionDataParallelTrainer:
             total_loss = 0.0
             count = 0
             for images in train_loader:
+                images = images[0] if len(images) == 1 else images
                 batch_size = images.shape[0]
                 batch_size_per_device = batch_size // self.num_devices
                 images = images.reshape((self.num_devices, 
@@ -508,6 +525,7 @@ class DiffusionDataParallelTrainer:
         total_loss = 0.0
         count = 0
         for images in test_loader:
+            images = images[0] if len(images) == 1 else images
             batch_size = images.shape[0]
             batch_size_per_device = batch_size // self.num_devices
             images = images.reshape((self.num_devices, 
@@ -544,22 +562,17 @@ class DiffusionDataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
+        self.params = self.get_ema_weights(self.params)
         with open(self.weights_filename, 'wb') as f:
-            ema_weights = self.get_ema_weights(self.state.params)
-            pickle.dump(ema_weights, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    def load_params(self, filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params

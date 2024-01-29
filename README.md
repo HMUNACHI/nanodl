@@ -59,7 +59,9 @@ from nanodl import GPT4, GPTDataParallelTrainer
 
 # Generate dummy data
 batch_size = 8
-max_length = 51
+max_length = 10
+
+# Replace with actual tokenised data
 data = jnp.ones((101, max_length), dtype=jnp.int32)
 
 # Shift to create next-token prediction dataset
@@ -77,6 +79,7 @@ dataloader = DataLoader(dataset,
 for batch in dataloader:
     x, y = batch
     print(x.shape, y.shape)
+    break
 
 # model parameters
 hyperparams = {
@@ -94,29 +97,34 @@ hyperparams = {
 
 # Initialize model
 model = GPT4(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
+rngs = jax.random.PRNGKey(0)
+rngs, dropout_rng = jax.random.split(rngs)
+params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
 
-# You call as you would a Jax/Flax model
-outputs = model.apply(params, dummy_inputs, rngs)
+# Call as you would a Jax/Flax model
+outputs = model.apply({'params': params}, 
+                      dummy_inputs, 
+                      rngs={'dropout': dropout_rng})
 print(outputs.shape)
 
 # Training on data
 trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, num_epochs=2)
+trainer.train(train_loader=dataloader, 
+              num_epochs=2, 
+              val_loader=dataloader)
+
 print(trainer.evaluate(dataloader))
 
 # Generating from a start token
-# Should always have dims (batch_size, seq_len)
-# Use 'generate_batch' method for generating in batches
 start_tokens = jnp.array([[123, 456]])
 
-# Remember to load the trained parameter 
+# Remember to load the trained parameters 
 params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
+                      start_tokens,
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
                       method=model.generate)
-print(output)
+print(outputs) 
 ```
 Vision example
 ```py
@@ -133,7 +141,7 @@ key = jax.random.PRNGKey(0)
 input_shape = (101, image_size, image_size, 3)
 images = jax.random.normal(key, input_shape)
 
-# Create dataset and dataloader
+# Use your own images
 dataset = ArrayDataset(images) 
 dataloader = DataLoader(dataset, 
                         batch_size=batch_size, 
@@ -148,12 +156,16 @@ print(pred_noises.shape, pred_images.shape)
 
 # Training on your data
 # Note: saved params are often different from training weights, use the saved params for generation
-trainer = DiffusionDataParallelTrainer(diffusion_model, images.shape, 'params.pkl')
+trainer = DiffusionDataParallelTrainer(diffusion_model, 
+                                       input_shape=images.shape, 
+                                       weights_filename='params.pkl', 
+                                       learning_rate=1e-4)
 trainer.train(dataloader, 10, dataloader)
 print(trainer.evaluate(dataloader))
 
 # Generate some samples
-generated_images = diffusion_model.apply(params, 
+params = trainer.load_params('params.pkl')
+generated_images = diffusion_model.apply({'params': params}, 
                                          num_images=5, 
                                          diffusion_steps=5, 
                                          method=diffusion_model.generate)
@@ -173,16 +185,23 @@ max_length = 50
 embed_dim = 256 
 vocab_size = 1000 
 
-# Generate data
+# Generate data: replace with actual tokenised/quantised data
 dummy_targets = jnp.ones((101, max_length), dtype=jnp.int32)
 dummy_inputs = jnp.ones((101, max_length, embed_dim))
 
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
+dataset = ArrayDataset(dummy_inputs, 
+                       dummy_targets)
+
 dataloader = DataLoader(dataset, 
                         batch_size=batch_size, 
                         shuffle=True, 
                         drop_last=False)
+
+# How to loop through dataloader
+for batch in dataloader:
+    x, y = batch
+    print(x.shape, y.shape)
+    break
 
 # model parameters
 hyperparams = {
@@ -206,18 +225,27 @@ outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs
 print(outputs.shape)
 
 # Training on your data
-trainer = WhisperDataParallelTrainer(
-  model, 
-  dummy_inputs.shape,
-  dummy_targets.shape, 
-  'params.pkl'
-  )
-trainer.train(dataloader, 10, dataloader)
-print(trainer.evaluate(dataloader))
+trainer = WhisperDataParallelTrainer(model, 
+                                     dummy_inputs.shape, 
+                                     dummy_targets.shape, 
+                                     'params.pkl')
+trainer.train(dataloader, 2, dataloader)
+
+# Sample inference
+params = trainer.load_params('params.pkl')
+
+# for more than one sample, use model.generate_batch
+transcripts = model.apply({'params': params}, 
+                          dummy_inputs[:1], 
+                          rngs=rngs, 
+                          method=model.generate)
+
+print(transcripts)
 ```
 
 PCA example
 ```py
+import jax
 from nanodl import PCA
 
 data = jax.random.normal(jax.random.key(0), (1000, 10))
@@ -231,14 +259,34 @@ print(X_sampled.shape, original_data.shape, transformed_data.shape)
 
 # Contribution
 
-This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Feel free to fork the repository, create a branch, make your changes, and submit a pull request. Please ensure that your contributions align with the repository's design patterns. If you have a problem, please use the discussion section. Contributions can be made in the form of writing docs, fixing bugs, implementing papers, writing high-coverage tests, experimenting and submitting real-world examples to the examples section, reporting bugs, or responding to reported issues.
+This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Follow the recommended steps:
+
+- Raise the issue/discussion to get second opinions
+- Fork the repository
+- Create a branch
+- Make your changes without ruining the design patterns
+- Write tests for your changes if necessary
+- Install locally with `pip install -e .`
+- Run tests with `python -m unittest discover -s tests`
+- Then submit a pull request from branch.
+
+Please ensure that your contributions align with the repository's design patterns.
+Contributions can be made in various forms:
+
+- Writing documentation.
+- Fixing bugs.
+- Implementing papers.
+- Writing high-coverage tests.
+- Experimenting and submitting real-world examples to the examples section.
+- Reporting bugs.
+- Responding to reported issues.
 
 ## Citing nanodl
 
 To cite this repository:
 
 ```
-@software{nanodl2020github,
+@software{nanodl2024github,
   author = {Henry Ndubuaku},
   title = {NanoDL: A Jax-based library for designing and training transformer models from scratch.},
   url = {http://github.com/hmunachi/nanodl},

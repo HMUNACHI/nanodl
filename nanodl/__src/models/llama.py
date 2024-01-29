@@ -6,18 +6,34 @@ Absolute positional embeddings are replaced with rotary positional embeddings (R
 
 Example usage:
 ```
-from llama import *
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import LlaMA2, LlaMADataParallelTrainer
 
-# Dummy data parameters
+# Generate dummy data
 batch_size = 8
-max_length = 51
-vocab_size = 1000 
-embed_dim = 256 
+max_length = 10
 
-# Generate data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+# Replace with actual tokenised data
+data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+# Shift to create next-token prediction dataset
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
+
+# Create dataset and dataloader
+dataset = ArrayDataset(dummy_inputs, dummy_targets)
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
+
+# How to loop through dataloader
+for batch in dataloader:
+    x, y = batch
+    print(x.shape, y.shape)
+    break
 
 # model parameters
 hyperparams = {
@@ -31,40 +47,46 @@ hyperparams = {
     'max_length': max_length,
     'start_token': 0,
     'end_token': 50,
-    'num_groups': 2
+    'num_groups': 2,
 }
 
 # Initialize model
 model = LlaMA2(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+rngs = jax.random.PRNGKey(0)
+rngs, dropout_rng = jax.random.split(rngs)
+params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+# Call as you would a Jax/Flax model
+outputs = model.apply({'params': params}, 
+                      dummy_inputs, 
+                      rngs={'dropout': dropout_rng})
 print(outputs.shape)
 
-# Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
+# Training on data
 trainer = LlaMADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
+trainer.train(train_loader=dataloader, 
+              num_epochs=2, 
+              val_loader=dataloader)
+
 print(trainer.evaluate(dataloader))
 
-# Generate: should always have dims (1, seq_len)
-input_sequence = jnp.array([[145, 656]])
-print(input_sequence.shape)
+# Generating from a start token
+start_tokens = jnp.array([[123, 456]])
 
-#params = trainer.load_params('params.pkl')
+# Remember to load the trained parameters 
+params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
-                      input_sequence, 
+                      start_tokens,
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
                       method=model.generate)
-
 print(outputs)
 ```
 '''
 
 import jax
+import flax
 import time
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
@@ -533,7 +555,7 @@ class LlaMA2(nn.Module):
             if next_token.item() == self.end_token:
                 break
 
-        return tuple(output_sequence)
+        return jnp.array(output_sequence)
     
 
     def generate_batch(self, 
@@ -597,6 +619,7 @@ class LlaMADataParallelTrainer:
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -742,22 +765,16 @@ class LlaMADataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
-            pickle.dump(self.state.params, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    @staticmethod
-    def load_params(filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params

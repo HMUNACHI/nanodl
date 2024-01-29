@@ -14,18 +14,34 @@ Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10
 
 example usage:
 ```
-from gpt import GPT4, GPTDataParallelTrainer
-
-# Dummy data parameters
-batch_size = 8
-max_length = 51
-vocab_size = 1000 
-embed_dim = 256 
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import GPT4, GPTDataParallelTrainer
 
 # Generate dummy data
-data = jnp.arange(batch_size * max_length, dtype=jnp.int32).reshape((batch_size, max_length))
+batch_size = 8
+max_length = 10
+
+# Replace with actual tokenised data
+data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+# Shift to create next-token prediction dataset
 dummy_inputs = data[:, :-1]
 dummy_targets = data[:, 1:]
+
+# Create dataset and dataloader
+dataset = ArrayDataset(dummy_inputs, dummy_targets)
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
+
+# How to loop through dataloader
+for batch in dataloader:
+    x, y = batch
+    print(x.shape, y.shape)
+    break
 
 # model parameters
 hyperparams = {
@@ -43,33 +59,41 @@ hyperparams = {
 
 # Initialize model
 model = GPT4(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs={'dropout': jax.random.PRNGKey(2)})
+rngs = jax.random.PRNGKey(0)
+rngs, dropout_rng = jax.random.split(rngs)
+params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+# Call as you would a Jax/Flax model
+outputs = model.apply({'params': params}, 
+                      dummy_inputs, 
+                      rngs={'dropout': dropout_rng})
 print(outputs.shape)
 
-# Training on your data
-dataloader = [(dummy_inputs, dummy_targets)] * 10
+# Training on data
 trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, num_epochs=2)
+trainer.train(train_loader=dataloader, 
+              num_epochs=2, 
+              val_loader=dataloader)
+
 print(trainer.evaluate(dataloader))
 
-# Generate: should always have dims (batch_size, seq_len)
+# Generating from a start token
 start_tokens = jnp.array([[123, 456]])
 
-# params = trainer.load_params('params.pkl')
+# Remember to load the trained parameters 
+params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
+                      start_tokens,
                       rngs={'dropout': jax.random.PRNGKey(2)}, 
                       method=model.generate)
-
 print(outputs)
 ```
 '''
 
 import jax
 import time
+import flax
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
@@ -287,8 +311,8 @@ class GPT3Decoder(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
-    vocab_size: float
-    embed_dim: float
+    vocab_size: int
+    embed_dim: int
 
     def setup(self):
         self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
@@ -340,8 +364,8 @@ class GPT3(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
-    vocab_size: float
-    embed_dim: float
+    vocab_size: int
+    embed_dim: int
     max_length: int
     start_token: int
     end_token: int
@@ -429,7 +453,7 @@ class GPT3(nn.Module):
             if next_token.item() == self.end_token:
                 break
 
-        return tuple(output_sequence)
+        return jnp.array(output_sequence)
     
 
     def generate_batch(self, 
@@ -655,8 +679,8 @@ class GPT4Decoder(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
-    vocab_size: float
-    embed_dim: float
+    vocab_size: int
+    embed_dim: int
     num_experts: int
     top_k: int
 
@@ -726,8 +750,8 @@ class GPT4(nn.Module):
     num_heads: int
     feedforward_dim: int
     dropout: float
-    vocab_size: float
-    embed_dim: float
+    vocab_size: int
+    embed_dim: int
     max_length: int
     start_token: int
     end_token: int
@@ -801,7 +825,7 @@ class GPT4(nn.Module):
             if next_token.item() == self.end_token:
                 break
 
-        return tuple(output_sequence)
+        return jnp.array(output_sequence)
     
 
     def generate_batch(self, 
@@ -864,6 +888,7 @@ class GPTDataParallelTrainer:
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -1008,22 +1033,16 @@ class GPTDataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
-            pickle.dump(self.state.params, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    @staticmethod
-    def load_params(filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params

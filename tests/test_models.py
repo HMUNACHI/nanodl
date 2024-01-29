@@ -34,37 +34,44 @@ class TestTextBasedModels(unittest.TestCase):
 
     def test_t5_model(self):
         model = T5(**self.hyperparams)
-        self._test_model(model)
+        self._test_encoder_decoder_model(model)
 
     def test_transformer_model(self):
         model = Transformer(**self.hyperparams)
-        self._test_model(model)
+        self._test_encoder_decoder_model(model)
 
     def test_lamda_model(self):
         model = LaMDA(**self.hyperparams)
-        self._test_model(model)
+        self._test_decoder_only_model(model)
 
     def test_gpt3_model(self):
         model = GPT4(**self.hyperparams)
-        self._test_model(model)
+        self._test_decoder_only_model(model)
 
     def test_gpt3_model(self):
         model = GPT4(**self.hyperparams)
-        self._test_model(model)
+        self._test_decoder_only_model(model)
 
     def test_mistral_model(self):
-        model = Mistral(**self.hyperparams)
-        self._test_model(model)
+        model = Mistral(**self.hyperparams, 
+                        num_groups=2, 
+                        window_size=5, 
+                        shift_size=2)
+        self._test_decoder_only_model(model)
 
     def test_mixtral_model(self):
-        model = Mixtral(**self.hyperparams)
-        self._test_model(model)
+        model = Mixtral(**self.hyperparams, 
+                        num_groups=2, 
+                        window_size=5, 
+                        shift_size=2)
+        self._test_decoder_only_model(model)
 
     def test_llama_model(self):
-        model = LlaMA2(**self.hyperparams)
-        self._test_model(model)
+        model = LlaMA2(**self.hyperparams,
+                       num_groups=2)
+        self._test_decoder_only_model(model)
 
-    def _test_model(self, model):
+    def _test_encoder_decoder_model(self, model):
         rngs = {
             'params': jax.random.key(0), 
             'dropout': jax.random.key(1)
@@ -80,6 +87,27 @@ class TestTextBasedModels(unittest.TestCase):
             {'params': params}, 
             self.dummy_inputs, 
             self.dummy_targets, 
+            rngs=rngs)
+        
+        self.assertEqual(
+            outputs.shape, 
+            (self.batch_size, self.max_length - 1, self.vocab_size)
+            )
+        
+    def _test_decoder_only_model(self, model):
+        rngs = {
+            'params': jax.random.key(0), 
+            'dropout': jax.random.key(1)
+            
+            }
+        params = model.init(
+            rngs, 
+            self.dummy_inputs
+            )['params']
+        
+        outputs = model.apply(
+            {'params': params}, 
+            self.dummy_inputs, 
             rngs=rngs)
         
         self.assertEqual(
@@ -151,7 +179,7 @@ class TestCLIPModel(unittest.TestCase):
         self.max_length = 50
         self.vocab_size = 1000
         self.embed_dim = 256
-        self.dummy_texts = jnp.ones((self.batch_size, self.max_length), dtype=jnp.int64)
+        self.dummy_texts = jnp.ones((self.batch_size, self.max_length), dtype=jnp.int32)
         self.dummy_images = jnp.ones((self.batch_size, 224, 224, 3))
 
         self.clip_params = {
@@ -266,6 +294,7 @@ class TestGATModel(unittest.TestCase):
     def setUp(self):
         self.num_nodes = 10
         self.num_features = 5
+        self.nclass = 3
 
         self.x = jax.random.normal(
             jax.random.PRNGKey(0), 
@@ -280,7 +309,7 @@ class TestGATModel(unittest.TestCase):
         self.model = GAT(
             nfeat=self.num_features, 
             nhid=8, 
-            nclass=3, 
+            nclass=self.nclass, 
             dropout_rate=0.5, 
             alpha=0.2, 
             nheads=3
@@ -291,18 +320,17 @@ class TestGATModel(unittest.TestCase):
             jax.random.key(0), 
             self.x, 
             self.adj, 
-            deterministic=True
+            training=False
             )
         
         output = self.model.apply(
             params, 
             self.x, 
             self.adj, 
-            deterministic=True
+            training=False
             )
         
-        self.assertEqual(output.shape, 
-                         (self.num_nodes, 3))
+        self.assertEqual(output.shape, (self.num_nodes, self.nclass))
 
 
 if __name__ == '__main__':

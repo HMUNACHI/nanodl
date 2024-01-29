@@ -11,7 +11,10 @@ enabling it to generalize well across various vision and language tasks while mi
 
 Example Usage:
 ```
-from clip import *
+import jax
+import jax.numpy as jnp
+from nanodl import ArrayDataset, DataLoader
+from nanodl import CLIP, CLIPDataParallelTrainer
 
 # Dummy data parameters
 batch_size = 8
@@ -21,42 +24,59 @@ embed_dim = 256
 patch_size = (16, 16)  
 
 # Generate dummy text and image data
-dummy_texts = jnp.ones((batch_size, max_length), dtype=jnp.int64)
+dummy_texts = jnp.ones((batch_size, max_length), dtype=jnp.int32)
 dummy_images = jnp.ones((batch_size, 224, 224, 3))
+dataset = ArrayDataset(dummy_texts, dummy_images)
+dataloader = DataLoader(dataset, 
+                        batch_size=batch_size, 
+                        shuffle=True, 
+                        drop_last=False)
 
 # CLIP model parameters
 clip_params = {
     "dropout": 0.1,
-    "num_heads": 8,
+    "num_heads": 2,
     "feedforward_dim": embed_dim,
-    "num_layers_text": 4,
+    "num_layers_text": 1,
     "hidden_dim_text": embed_dim,
     "image_patch_size": patch_size,
     "hidden_dim_image": embed_dim,
-    "num_layers_images": 4,
+    "num_layers_images": 1,
     "max_len": max_length,
     "vocab_size": vocab_size,
     "embed_dim": embed_dim
 }
 
-    # Initialize CLIP model
-    clip_model = CLIP(**clip_params)
-    rng = jax.random.PRNGKey(0)
-    params = clip_model.init(rng, dummy_texts, dummy_images)['params']
-    loss = clip_model.apply({'params': params}, dummy_texts, dummy_images)
+# Initialize CLIP model
+clip_model = CLIP(**clip_params)
+rng = jax.random.PRNGKey(0)
+params = clip_model.init(rng, dummy_texts, dummy_images)['params']
+loss = clip_model.apply({'params': params}, dummy_texts, dummy_images)
 
-    # Training on your data
-    dataloader = [(dummy_texts, dummy_images)] * 10
-    trainer = CLIPDataParallelTrainer(clip_model, dummy_texts.shape, dummy_images.shape, 'clip_params.pkl')
-    trainer.train(dataloader, 2)
-    print(trainer.evaluate(dataloader))
+# Training on your data
+trainer = CLIPDataParallelTrainer(clip_model, 
+                                  dummy_texts.shape, 
+                                  dummy_images.shape, 'params.pkl')
+trainer.train(dataloader, 2)
+
+# Sample encodings
+image_encodings = clip_model.apply({'params': params}, 
+                                images = dummy_images,
+                                method=clip_model.encode_image) 
+print(image_encodings.shape)
+
+# Sample embeddings
+image_embeddings = clip_model.apply({'params': params}, 
+                                images = dummy_images,
+                                method=clip_model.embed_image) 
+print(image_embeddings.shape)
 ```
 '''
 
 import jax
+import flax
 import time
 import optax
-import pickle
 import jax.numpy as jnp
 import flax.linen as nn
 
@@ -588,7 +608,7 @@ class CLIP(nn.Module):
         Returns:
             Text embeddings.
         """
-        return self.text_encoder(texts)
+        return self.text_encoder(texts)[0]
 
     def encode_image(self, 
                      images: jnp.ndarray) -> jnp.ndarray:
@@ -599,7 +619,7 @@ class CLIP(nn.Module):
         Returns:
             Image embeddings.
         """
-        return self.image_encoder(images)
+        return self.image_encoder(images)[0]
 
     def embed_text(self, 
                    texts: jnp.ndarray) -> jnp.ndarray:
@@ -610,7 +630,12 @@ class CLIP(nn.Module):
         Returns:
             Pooled text embeddings.
         """
-        return self.text_pooler(self.text_encoder(texts))
+        return self.text_pooler(
+            jnp.mean(
+                self.text_encoder(texts)[0], 
+                axis=1
+                )
+            )
 
     def embed_image(self, 
                     images: jnp.ndarray) -> jnp.ndarray:
@@ -621,7 +646,12 @@ class CLIP(nn.Module):
         Returns:
             Pooled image embeddings.
         """
-        return self.image_pooler(self.image_encoder(images))
+        return self.image_pooler(
+            jnp.mean(
+                self.image_encoder(images)[0], 
+                axis=1
+                )
+            )
 
 
 
@@ -646,6 +676,7 @@ class CLIPDataParallelTrainer:
                  learning_rate: float = 1e-5,
                  params_path: Optional[str] = None) -> None:
         self.model = model
+        self.params = None
         self.params_path = params_path
         self.num_parameters = None
         self.best_val_loss = float("inf")
@@ -785,21 +816,16 @@ class CLIPDataParallelTrainer:
 
     def save_params(self) -> None:
         """
-        Saves the model parameters to a file.
+        Saves the unreplicated model parameters to a file.
         """
+        self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
-            pickle.dump(self.state.params, f)
+            f.write(flax.serialization.to_bytes(self.params))
 
-    def load_params(self, filename: str) -> Any:
+    def load_params(self, filename: str):
         """
-        Loads the model parameters from a file.
-
-        Args:
-            filename: The filename of the file containing the parameters.
-
-        Returns:
-            The loaded parameters.
+        Loads the model parameters from a file
         """
         with open(filename, 'rb') as f:
-            params = pickle.load(f)
-        return params
+            self.params = flax.serialization.from_bytes(self.params, f.read())
+        return self.params
