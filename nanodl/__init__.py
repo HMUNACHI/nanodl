@@ -1,3 +1,5 @@
+__version__ = "1.0.0.dev1"
+
 from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
 from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
 from nanodl.__src.sklearn_gpu.clustering import KMeans, GaussianMixtureModel
@@ -155,9 +157,6 @@ from nanodl.__src.utils.vision import(
     random_flip_image,
     sobel_edge_detection,
 )
-
-
-__version__ = "0.2.1-alpha"
 
 
 __all__ = [
