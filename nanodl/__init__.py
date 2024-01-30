@@ -156,7 +156,9 @@ from nanodl.__src.utils.vision import(
     sobel_edge_detection,
 )
 
-__version__ = "1.0.0.dev1"
+
+__version__ = "0.2.1-alpha"
+
 
 __all__ = [
     # Sklearn GPU
