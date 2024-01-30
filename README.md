@@ -24,21 +24,21 @@ NanoDL also provides unique data-parallel distributed trainers and various custo
 
 Additionally, while Scikit Learn is widely used for classical ML model development, it lacks native GPU/TPU support for intensive computations. NanoDL fills this gap by offering GPU/TPU-accelerated models such as PCA, KMeans, Gaussian Mixed Models, and others, using Jax.NumPy().
 
-For NLP and Computer Vision applications, NanoDL provides essential auxiliary algorithms, including dataloaders, for preprocessing and evaluation. However, it's important to note that NanoDL is designed for building models from scratch and does not provide pretrained weights. Users seeking pretrained models should refer to resources like HuggingFace. 
+For NLP and Computer Vision applications, NanoDL provides essential auxiliary algorithms, including dataloaders, for preprocessing and evaluation. However, it's important to note that NanoDL is designed for building models from scratch for now, pretrained weights will be provided in the future. 
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
 ## Quick install
 
-You will need Python 3.6 or later, and working [JAX](https://github.com/google/jax/blob/main/README.md)
+You will need Python 3.9 or later, and working [JAX](https://github.com/google/jax/blob/main/README.md)
 installation, [FLAX](https://github.com/google/flax/blob/main/README.md)
 installation, [OPTAX](https://github.com/google-deepmind/optax/blob/main/README.md)
 installation (with GPU support for running training, without can only support creations).
-For a CPU-only version of JAX:
+Models can be designed and tested on CPUs but trainers are all Distributed Data-Parallel which would require a GPU with 1 to N GPUS/TPUS. For CPU-only version of JAX:
 
 ```
 pip install --upgrade pip # To support manylinux2010 wheels.
-pip install --upgrade jax jaxlib flax optax # CPU-only
+pip install jax, flax, optax
 ```
 
 Then, install nanodl from PyPi:
@@ -270,7 +270,6 @@ This is the first iteration of this project, roughness is expected, contribution
 - Run tests with `python -m unittest discover -s tests`
 - Then submit a pull request from branch.
 
-Please ensure that your contributions align with the repository's design patterns.
 Contributions can be made in various forms:
 
 - Writing documentation.
@@ -291,12 +290,11 @@ To follow up or share thoughts, follow [here](https://forms.gle/vwveb9SKdPYywHx9
 
 ## Sponsorships
 
-The name "NanoDL" stands for Nano Deep Learning. Following the success of Phi models, 
-the long-term goal is to build and train nano versions of all available models,
-while ensuring they compete with the original models in performance, while limiting 
-the number of parameters at 1B. Models are exploding in size, therefore gate-keeping 
-experts and companies with limited resources, there is a need to remedy this.
-Trained weights will be made available via this library, as well as Huggingface.
+The name "NanoDL" stands for Nano Deep Learning. Models are exploding in size, therefore gate-keeping 
+experts and companies with limited resources from building flexible models without prohibitive costs.
+Following the success of Phi models, the long-term goal is to build and train nano versions of all available models,
+while ensuring they compete with the original models in performance, with total 
+number of parameters not exceeding 1B. Trained weights will be made available via this library.
 Any form of sponsorship, funding, grants or contribution will help with training resources.
 You can sponsor via the tag on the user profile, or reach out via ndubuakuhenry@gmail.com.
 
