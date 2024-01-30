@@ -24,5 +24,6 @@ jobs:
       run: |
         echo "Setting version to: ${GITHUB_REF#refs/tags/}"
         sed -i "s/version='.*',/version='${GITHUB_REF#refs/tags/}',/" setup.py
+        sed -i "s/__version__ = '.*'/__version__ = '${GITHUB_REF#refs/tags/}'/" nanodl/__init__.py
         python setup.py sdist bdist_wheel
         twine upload dist/*
