@@ -16,6 +16,7 @@ Thumbs.db
 /dist/
 /node_modules/
 /.venv/
+/.vscode/
 /nanodl.egg-info/
 __pycache__/
 
