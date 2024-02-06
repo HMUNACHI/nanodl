@@ -18,13 +18,17 @@ Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Nd
 
 ## Overview
 
-Developing and training transformer-based models is typically resource-intensive and time-consuming. AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge by offering a range of advanced models such as LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Mixers, Diffusion, Whisper, ViT, CLIP, GAT, and standard Transformers. 
+Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
 
-NanoDL also provides unique data-parallel distributed trainers and various custom development layers like RoPE, GQA, MQA, Relative Attention, SWin attention, Patch Embedding and more. Importantly, all model files in NanoDL are independent, allowing developers to easily download/copy, and use them. These trainers are designed for single-node multi-device setup for now.
-
-Additionally, while Scikit Learn is widely used for classical ML model development, it lacks native GPU/TPU support for intensive computations. NanoDL fills this gap by offering GPU/TPU-accelerated models such as PCA, KMeans, Gaussian Mixed Models, and others, using Jax.NumPy().
-
-For NLP and Computer Vision applications, NanoDL provides essential auxiliary algorithms, including dataloaders, for preprocessing and evaluation. However, it's important to note that NanoDL is designed for building models from scratch for now, pretrained weights will be provided in the future. 
+- A wide array of blocks and layers, facilitating the creation of customised transformer models from scratch.
+- An extensive selection of models like LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Whisper, ViT, Mixers, GAT, CLIP, and more, catering to a variety of tasks and applications.
+- Data-parallel distributed trainers so developers can efficiently train large-scale models on multiple GPUs or TPUs, without the need for manual training loops.
+- Dataloaders, making the process of data handling for Jax/Flax more straightforward and effective.
+- Custom layers not found in Flax/Jax, such as RoPE, GQA, MQA, and SWin attention, allowing for more flexible model development.
+- GPU/TPU-accelerated classical ML models like PCA, KMeans, Regression, Gaussian Processes etc., akin to SciKit Learn on GPU.
+- Modular design so users can blend elements from various models, such as GPT, Mixtral, and LlaMa2, to craft unique hybrid transformer models.
+- A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU etc.
+- Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
