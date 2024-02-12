@@ -12,12 +12,11 @@
 [**Overview**](#overview)
 | [**Quick install**](#quick-install)
 | [**What does NanoDL look like?**](#what-does-nanodl-look-like)
-| [**Documentation**](https://nan.readthedocs.io/)
+| [**Documentation**](https://nanodl.readthedocs.io/)
 
-Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) since 2022, and is now developed jointly with the open source community.
+Author: [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/)
 
 ## Overview
-
 Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
 
 - A wide array of blocks and layers, facilitating the creation of customised transformer models from scratch.
