@@ -76,7 +76,7 @@ class TestRegression(unittest.TestCase):
         x_data = jax.random.normal(jax.random.PRNGKey(0), (num_samples, input_dim))
         y_data = jnp.dot(x_data, jnp.array([[2.0]])) - jnp.array([[-1.0]])
         lr_model = LinearRegression(input_dim, output_dim)
-        lr_model.train(x_data, y_data)
+        lr_model.fit(x_data, y_data)
         learned_weights, learned_bias = lr_model.get_params()
         self.assertTrue(jnp.allclose(learned_weights, jnp.array([[2.0]]), atol=1e-1))
         self.assertTrue(jnp.allclose(learned_bias, jnp.array([[1.0]]), atol=1e-1))
@@ -88,7 +88,7 @@ class TestRegression(unittest.TestCase):
         logits = jnp.dot(x_data, jnp.array([0.5, -0.5])) - 0.1
         y_data = (logits > 0).astype(jnp.float32)
         lr_model = LogisticRegression(input_dim)
-        lr_model.train(x_data, y_data)
+        lr_model.fit(x_data, y_data)
         test_data = jax.random.normal(jax.random.PRNGKey(0), (num_samples, input_dim))
         predictions = lr_model.predict(test_data)
         self.assertTrue(jnp.all(predictions >= 0) and jnp.all(predictions <= 1))
