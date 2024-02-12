@@ -22,10 +22,12 @@ def rouge(hypotheses: List[str],
         dict: Dictionary containing precision, recall, and F1-score for each n-gram size.
     
     Example usage:
+    ```
         >>> hypotheses = ["the cat is on the mat", "there is a cat on the mat"]
         >>> references = ["the cat is on the mat", "the cat sits on the mat"]
         >>> rouge_scores = rouge(hypotheses, references, [1, 2])
         >>> print(rouge_scores)
+    ```
     """
     def ngrams(sequence: List[str], n: int) -> List[str]:
         return [tuple(sequence[i:i+n]) for i in range(len(sequence) - n + 1)]
@@ -86,10 +88,12 @@ def bleu(hypotheses: List[str],
         float: BLEU score.
     
     Example usage:
+    ```
         >>> hypotheses = ["the cat is on the mat", "there is a cat on the mat"]
         >>> references = ["the cat is on the mat", "the cat sits on the mat"]
         >>> bleu_score = bleu(hypotheses, references)
         >>> print(bleu_score)
+    ```
     """
     def ngrams(sequence: List[str], n: int) -> List[str]:
         return [tuple(sequence[i:i+n]) for i in range(len(sequence) - n + 1)]
@@ -142,10 +146,12 @@ def meteor(hypothesis: str,
         float: METEOR score.
     
     Example usage:
+    ```
         >>> hypothesis = "the cat is on the mat"
         >>> reference = "the cat sits on the mat"
         >>> meteor_score = meteor(hypothesis, reference)
         >>> print(meteor_score)
+    ```
     """
     
     def tokenize(sentence):
@@ -200,10 +206,12 @@ def cider_score(hypothesis: str,
         float: CIDEr score.
     
     Example usage:
+    ```
         >>> hypothesis = "the cat is on the mat"
         >>> reference = "the cat sits on the mat"
         >>> score = cider_score(hypothesis, reference)
         >>> print(score)
+    ```
     """
     def tokenize(sentence):
         return re.findall(r'\w+', sentence.lower())
@@ -256,9 +264,11 @@ def perplexity(log_probs: List[float]) -> float:
         float: Perplexity score.
     
     Example usage:
+    ```
         >>> log_probs = [-2.3, -1.7, -0.4]  # Example log probabilities
         >>> perplexity_score = perplexity(log_probs)
         >>> print(perplexity_score)
+    ```
     """
     log_likelihood = 0.0
     word_count = 0
@@ -285,10 +295,12 @@ def word_error_rate(hypotheses: List[int], references: List[int]) -> float:
         float: Word Error Rate score.
     
     Example usage:
+    ```
         >>> hypotheses = ["the cat is on the mat", "there is a cat on the mat"]
         >>> references = ["the cat is on the mat", "the cat sits on the mat"]
         >>> wer_score = word_error_rate(hypotheses, references)
         >>> print(wer_score)
+    ```
     """
     def edit_distance(str1, str2):
         len_str1 = len(str1)

@@ -1,95 +1,3 @@
-'''
-Transformers are a groundbreaking class of deep learning models originally introduced in the paper "Attention Is All You Need" by Vaswani et al. 
-Their motivation stems from addressing limitations in previous sequence-to-sequence models and enabling more efficient and parallelizable training. 
-The key innovation of transformers is the self-attention mechanism, which allows the model to weigh the importance of different parts of the input sequence during processing. 
-This architecture has had a profound impact on natural language processing and has been adapted for a wide range of tasks, including machine translation, text generation, image captioning, and more. 
-Transformers have become the foundation for various state-of-the-art models, including BERT, GPT, and Transformer, which have achieved remarkable results across multiple domains, showcasing the power of attention-based architectures in deep learning.
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import Transformer, TransformerDataParallelTrainer
-
-# Generate dummy data
-batch_size = 8
-max_length = 10
-
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length+1), dtype=jnp.int32)
-
-# Shift to create next-token prediction dataset
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = Transformer(**hyperparams)
-rngs = jax.random.PRNGKey(0)
-rngs, dropout_rng = jax.random.split(rngs)
-params = model.init({'params': rngs, 'dropout': dropout_rng}, 
-                    dummy_inputs,
-                    dummy_targets)['params']
-
-# Call as you would a Jax/Flax model
-outputs = model.apply({'params': params}, 
-                      dummy_inputs, 
-                      dummy_targets,
-                      rngs={'dropout': dropout_rng})
-print(outputs.shape)
-
-# Training on data
-trainer = TransformerDataParallelTrainer(model, 
-                                dummy_inputs.shape, 
-                                dummy_targets.shape,
-                                'params.pkl')
-
-trainer.train(train_loader=dataloader, 
-              num_epochs=2, 
-              val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
-start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-print(outputs)
-```
-'''
-
 import jax
 import flax
 import time
@@ -382,13 +290,19 @@ class TransformerEncoder(nn.Module):
 
 class TransformerDecoderBlock(nn.Module):
     """
-    Transformer Decoder Block.
+    Implements a single decoder block for the Transformer model, combining self-attention, encoder-decoder attention, and a feed-forward network.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    This block first processes the input through self-attention, allowing each position to attend to all positions up to and including itself. Then, it applies encoder-decoder attention, integrating information from the encoder's output. Finally, a position-wise feed-forward network is applied.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the Transformer decoder block.
+        __call__(x, context, training): Processes the input tensor through the decoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -439,14 +353,24 @@ class TransformerDecoderBlock(nn.Module):
 
 class TransformerDecoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the Transformer model.
 
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The Transformer decoder generates output sequences by processing input through multiple layers of TransformerDecoderBlocks. It incorporates context from the encoder at each layer to generate predictions.
+
+    Attributes:
+        num_layers (int): Number of TransformerDecoderBlocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        max_len (int): Maximum sequence length.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        learned_position (bool): Indicates if positional embeddings are learned or static.
+
+    Methods:
+        setup(): Initializes the components of the Transformer decoder.
+        __call__(x, context, training): Processes the input tensor through the decoder.
     """
     num_layers: int
     hidden_dim: int
@@ -490,17 +414,117 @@ class TransformerDecoder(nn.Module):
     
 class Transformer(nn.Module):
     """
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        hidden_dim (int): Dimensionality of input embeddings.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    Implements the Transformer model for sequence-to-sequence tasks, such as translation and text generation.
+
+    The Transformer model utilizes an encoder-decoder architecture. The encoder captures contextual information from the input sequence, and the decoder generates the output sequence based on this context.
+
+    Attributes:
+        num_layers (int): Number of layers in both the encoder and decoder.
+        num_heads (int): Number of attention heads in each layer.
+        hidden_dim (int): Dimensionality of the input and output features for the layers.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the layers.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+
+    Methods:
+        setup(): Initializes the Transformer model including both the encoder and decoder components.
+        __call__(x, y, training): Processes the input tensor through the Transformer model, generating predictions.
+        generate(x, temperature, deterministic): Generates output sequences from input sequences.
+        generate_batch(x, temperature, deterministic): Generates output sequences for a batch of input sequences.
+    
+    Transformers are a groundbreaking class of deep learning models originally introduced in the paper "Attention Is All You Need" by Vaswani et al. 
+    Their motivation stems from addressing limitations in previous sequence-to-sequence models and enabling more efficient and parallelizable training. 
+    The key innovation of transformers is the self-attention mechanism, which allows the model to weigh the importance of different parts of the input sequence during processing. 
+    This architecture has had a profound impact on natural language processing and has been adapted for a wide range of tasks, including machine translation, text generation, image captioning, and more. 
+    Transformers have become the foundation for various state-of-the-art models, including BERT, GPT, and Transformer, which have achieved remarkable results across multiple domains, showcasing the power of attention-based architectures in deep learning.
+
+    Example usage:
+        ```
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Transformer, TransformerDataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length+1), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = Transformer(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, 
+                            dummy_inputs,
+                            dummy_targets)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            dummy_targets,
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = TransformerDataParallelTrainer(model, 
+                                        dummy_inputs.shape, 
+                                        dummy_targets.shape,
+                                        'params.pkl')
+
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+```
     """
     num_layers: int
     num_heads: int
@@ -549,18 +573,7 @@ class Transformer(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         encoded_sequence = self.encoder(x=x, training=False)[0]
         decoder_input = jnp.array([[self.start_token]])
         output_sequence = []
@@ -593,17 +606,7 @@ class Transformer(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
+        
         encoded_sequence = self.encoder(x=x, training=False)[0]
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = jnp.full((batch_size, 1), self.start_token)

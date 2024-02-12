@@ -1,93 +1,3 @@
-'''
-Mistral 7B is a large language model (LLM) designed for enhanced efficiency and performance. It utilizes Grouped-Query Attention (GQA) to achieve quicker inference times. 
-It incorporates Sliding Window Attention (SWA), enabling it to efficiently process sequences of any length while minimizing the cost of inference. 
-Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
-Absolute positional embeddings are replaced with rotary positional embeddings (RoPE), implemented at each layer of the network. For specific hyper-parameter details, refer to Table 2 in the document.
-
-Mixtral is an architectural upgrade within Mistral. Leverages "Sparse Mixture-of-Experts" (MoE). Each layer has 8 expert groups, 
-but a "router network" selects only 2 relevant ones per token, reducing active calculations and boosting efficiency.
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import Mistral, MistralDataParallelTrainer
-
-# Generate dummy data
-batch_size = 8
-max_length = 10
-
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length+1), dtype=jnp.int32)
-
-# Shift to create next-token prediction dataset
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-    'num_groups': 2,
-    'window_size': 5,
-    'shift_size': 2
-}
-
-# Initialize model
-model = Mistral(**hyperparams)
-rngs = jax.random.PRNGKey(0)
-rngs, dropout_rng = jax.random.split(rngs)
-params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
-
-# Call as you would a Jax/Flax model
-outputs = model.apply({'params': params}, 
-                      dummy_inputs, 
-                      rngs={'dropout': dropout_rng})
-print(outputs.shape)
-
-# Training on data
-trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(train_loader=dataloader, 
-              num_epochs=2, 
-              val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
-start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-print(outputs)
-```
-'''
-
 import jax
 import flax
 import time
@@ -100,48 +10,29 @@ from typing import Tuple, Any, Optional, Iterable
 
 class RotaryPositionalEncoding():
     """
-    The rotary position embeddings from RoFormer_ (Su et. al).
-    A crucial insight from the method is that the query and keys are
-    transformed by rotation matrices which depend on the relative positions.
+    Implements rotary positional encoding (RoPE) for transformers, enhancing their ability to capture sequence order.
 
-    Other implementations are available in the Rotary Transformer repo_ and in
-    GPT-NeoX_, GPT-NeoX was an inspiration
+    Rotary positional encoding applies a rotation to the embedding of each token based on its position in the sequence. This method helps preserve the relative positional information between tokens in a more effective manner compared to traditional positional encodings.
 
-    .. _RoFormer: https://arxiv.org/abs/2104.09864
-    .. _repo: https://github.com/ZhuiyiTechnology/roformer
-    .. _GPT-NeoX: https://github.com/EleutherAI/gpt-neox
+    Attributes:
+        dim_model (int): The dimensionality of the model embeddings.
 
-
-    .. This is implemented outside nn module as is modifies an external state
-       It is also puporsefully broken down for explainability
+    Methods:
+        _update_cos_sin_tables(x, seq_dimension): Updates cosine and sine tables based on the sequence length.
+        rotate_half(x): Rotates the last half of the dimensions of x by swapping them and changing signs to simulate a 90-degree rotation.
+        apply_rotary_pos_emb(x, cos, sin): Applies the rotary positional encoding to the input embeddings.
+        __call__(q, k): Applies rotary positional encoding to query and key tensors in attention mechanisms.
     """
-
     def __init__(self, dim_model: int):
-        """
-        Args:
-            dim_model: The dimension of the input and output embeddings.
-        """
         super().__init__()
         self.dim_model = dim_model
-
         inv_freq = 1.0 / (10000 ** (jnp.arange(0, dim_model, 2, dtype=jnp.float32) / dim_model))
         self.inv_freq = inv_freq
-
         self._seq_len_cached = None
         self._cos_cached = None
         self._sin_cached = None
 
     def _update_cos_sin_tables(self, x, seq_dimension=1):
-        """
-        Update the cached cosine and sine tables, if necessary.
-
-        Args:
-            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
-            seq_dimension: The dimension that represents the sequence length.
-
-        Returns:
-            The updated cosine and sine tables.
-        """
         seq_len = x.shape[seq_dimension]
 
         if seq_len != self._seq_len_cached:
@@ -155,47 +46,16 @@ class RotaryPositionalEncoding():
         return self._cos_cached, self._sin_cached
 
     def rotate_half(self, x):
-        """
-        Split the input tensor into two halves, rotate the second half by 180 degrees, and concatenate the two halves back together.
-
-        Args:
-            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
-
-        Returns:
-            The rotated tensor.
-        """
         x1, x2 = jnp.split(x, 2, axis=-1)
         return jnp.concatenate((-x2, x1), axis=-1)
 
     def apply_rotary_pos_emb(self, x, cos, sin):
-        """
-         Apply the rotary position embeddings to the input tensor.
-
-        Args:
-            x: The input tensor, of shape `(batch_size, seq_len, dim)`.
-            cos: The cosine table, of shape `(batch_size, 1, seq_len, dim)`.
-            sin: The sine table, of shape `(batch_size, 1, seq_len, dim)`.
-
-        Returns:
-            The embedded tensor.
-        """
         cos = cos[:, :, : x.shape[-2], :]
         sin = sin[:, :, : x.shape[-2], :]
         return (x * cos) + (self.rotate_half(x) * sin)
 
     def __call__(self, q, k):
-        """
-         Apply the rotary position embeddings to the query and key tensors.
-
-        Args:
-            q: The query tensor, of shape `(batch_size, seq_len, dim)`.
-            k: The key tensor, of shape `(batch_size, seq_len, dim)`.
-
-        Returns:
-            The embedded query and key tensors.
-        """
         self._cos_cached, self._sin_cached = self._update_cos_sin_tables(k, seq_dimension=-2)
-
         return (
             self.apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached)[0],
             self.apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached)[0],
@@ -204,7 +64,24 @@ class RotaryPositionalEncoding():
 
 class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
     """
-    Attention which uses RoPE, Grouped Query and Sliding Window Attention.
+    Implements grouped rotary positional encoding and shifted window mechanism for multi-head attention.
+
+    This module enhances the self-attention mechanism by incorporating rotary positional encodings and processing the attention within shifted windows. It aims to capture both local and global dependencies more effectively while maintaining computational efficiency.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads.
+        num_groups (int): Number of groups to split the heads into for applying rotary positional embeddings separately.
+        window_size (int): Size of each window for processing local context.
+        shift_size (int): Number of positions to shift the window at each layer to capture global context.
+
+    Methods:
+        setup(): Initializes the projections for query, key, value, and output, along with the rotary positional encoder.
+        __call__(inputs, context, mask): Processes the input and context tensors through the grouped rotary and shifted window multi-head attention mechanism.
+        process_group(query, key, value, mask): Processes a single group of heads through rotary positional encoding, shifted window partitioning, and attention.
+        window_partition(x): Partitions the input tensor into windows of a specified size.
+        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors within each window.
+        causal_mask(shape): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism within windows.
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
@@ -235,16 +112,6 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
                  context: jnp.ndarray, 
                  mask: jnp.ndarray) -> tuple:
 
-        """
-        Args:
-            inputs: inputs ((batch_size, seq_len, dims))
-            context: optional - context ((batch_size, seq_len, dims))
-            Mask: optional - masks where reqions to ignore are flipped to os
-                  regions to attend to are 1s (batch_size, seq_len, dims)
-
-        Return: outputs (batch_size, seq_len, seq_len)
-                attention matrixes (batch_size, heads, seq_len, seq_len)
-        """
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
@@ -258,8 +125,6 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
         # Repeat the key and values
         key = jnp.repeat(key, self.num_heads, axis=-1)
         value = jnp.repeat(value, self.num_heads, axis=-1)
-        
-        # Vectorize the process_group function
         vectorized_process_group = jax.vmap(self.process_group, in_axes=(0, None, None, None))
         results = vectorized_process_group(grouped_query, key, value, mask)
 
@@ -313,17 +178,7 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
     
     def causal_mask(self, 
                 shape: Tuple[int, ...]) -> jnp.ndarray:
-        """
-        Generate a causal mask for attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
+        
         # Create index tensors for the source and destination dimensions
         source_dim, destination_dim = shape[-2], shape[-2]
         idx_source = jnp.arange(destination_dim)[:, None]
@@ -364,13 +219,22 @@ class PositionWiseFFN(nn.Module):
     
 class MistralDecoderBlock(nn.Module):
     """
-    Transformer Decoder Block.
+    Implements a decoder block for the Mistral model, incorporating grouped rotary shifted window multi-head attention.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    This block is designed to enhance the model's ability to understand and generate text by applying rotary positional embeddings and processing the attention within shifted windows. It aims to capture both local and global dependencies more effectively while maintaining computational efficiency.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+        num_groups (int): Number of groups to split the heads into for applying rotary positional embeddings separately.
+        window_size (int): Size of each window for processing local context.
+        shift_size (int): Number of positions to shift the window at each layer to capture global context.
+
+    Methods:
+        setup(): Initializes the components of the Mistral decoder block.
+        __call__(x, training): Processes the input tensor through the Mistral decoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -404,18 +268,7 @@ class MistralDecoderBlock(nn.Module):
     def __call__(self, 
                 x: jnp.ndarray,
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         x = self.norm1(x)
         attended_x, attention1 = self.attention1(x, x, mask=True)
         x = self.dropout1(x, deterministic=not training)
@@ -436,14 +289,25 @@ class MistralDecoderBlock(nn.Module):
 
 class MistralDecoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the Mistral model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The decoder is composed of multiple MistralDecoderBlocks, processing sequences of tokens to generate text. It includes an embedding layer to convert tokens into vectors and an output layer to predict the next token in the sequence.
+
+    Attributes:
+        num_layers (int): Number of MistralDecoderBlocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        num_groups (int): Number of groups for the grouped rotary positional embeddings in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        window_size (int): Window size used in grouped rotary shifted window multi-head attention.
+        shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
+
+    Methods:
+        setup(): Initializes the components of the Mistral decoder.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral decoder.
     """
     num_layers: int
     hidden_dim: int
@@ -475,19 +339,7 @@ class MistralDecoder(nn.Module):
                  x: jnp.ndarray,
                  training: bool = False,
                  drop_last_layer: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -505,17 +357,118 @@ class MistralDecoder(nn.Module):
 
 class Mistral(nn.Module):
     """
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        hidden_dim (int): Dimensionality of input embeddings.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    Implements the Mistral model for text generation, featuring grouped rotary shifted window multi-head attention.
+
+    Mistral enhances the transformer architecture by incorporating grouped rotary positional embeddings within its decoder blocks and utilizing a shifted window strategy to better capture local and global sequence contexts.
+
+    Attributes:
+        num_layers (int): Number of layers (blocks) in the Mistral model.
+        num_heads (int): Number of attention heads in each block.
+        num_groups (int): Number of groups for the grouped rotary positional embeddings in each block.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+        window_size (int): Window size used in grouped rotary shifted window multi-head attention.
+        shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
+
+    Methods:
+        setup(): Initializes the Mistral model including the decoder component.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral model.
+        generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
+        generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
+    
+        Mistral 7B is a large language model (LLM) designed for enhanced efficiency and performance. It utilizes Grouped-Query Attention (GQA) to achieve quicker inference times. 
+    It incorporates Sliding Window Attention (SWA), enabling it to efficiently process sequences of any length while minimizing the cost of inference. 
+    Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
+    Absolute positional embeddings are replaced with rotary positional embeddings (RoPE), implemented at each layer of the network. For specific hyper-parameter details, refer to Table 2 in the document.
+
+    Mixtral is an architectural upgrade within Mistral. Leverages "Sparse Mixture-of-Experts" (MoE). Each layer has 8 expert groups, 
+    but a "router network" selects only 2 relevant ones per token, reducing active calculations and boosting efficiency.
+
+    Example usage:
+        ```
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Mistral, MistralDataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length+1), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+            'num_groups': 2,
+            'window_size': 5,
+            'shift_size': 2
+        }
+
+        # Initialize model
+        model = Mistral(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
     """
     num_layers: int
     num_heads: int
@@ -532,9 +485,6 @@ class Mistral(nn.Module):
     shift_size: int
 
     def setup(self):
-        """
-        Initialize the Mistral model 
-        """
         self.decoder = MistralDecoder(self.num_layers,
                                 self.hidden_dim,
                                 self.num_heads,
@@ -551,16 +501,11 @@ class Mistral(nn.Module):
                  training: bool = False,
                  drop_last_layer: bool = False) -> jnp.ndarray:
         
-        """ 
-        Sequence-to-sequence models use teacher forcing during training and as such, 
-        the decoder input is the ground truth sequence.
-        """
         return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
     
     def zero_pad(self, arr, max_length):
-        """Zero-pad the given array to the specified maximum length along axis=1."""
         current_length = arr.shape[1] 
         num_zeros = max_length - current_length 
 
@@ -577,18 +522,7 @@ class Mistral(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
 
@@ -621,17 +555,6 @@ class Mistral(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
 
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
@@ -711,37 +634,35 @@ class SparseMixtureOfExperts(nn.Module):
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
         gating_weights = nn.softmax(self.gate(X), axis=-1)
-
-        # Get top K experts for each example in the batch
         top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k:]
-
-        # Get expert outputs
         expert_outputs = jnp.stack([expert(X) for expert in self.experts], axis=2)
-
-        # Select only the top K expert outputs
         batch_size, seq_length, _ = X.shape
         batch_indices = jnp.arange(batch_size)[:, None, None]
         seq_indices = jnp.arange(seq_length)[None, :, None]
         top_k_expert_outputs = expert_outputs[batch_indices, seq_indices, top_k_indices]
-
-        # Compute the gating weights for the selected top K experts
         top_k_gating_weights = jnp.take_along_axis(gating_weights, top_k_indices, axis=-1)
-
-        # Compute the mixed expert output
         mixed_expert_output = jnp.sum(top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2)
-
         return self.dense_final(mixed_expert_output)
     
 
 class MixtralDecoderBlock(nn.Module):
     """
-    Transformer Decoder Block with Mixture-of-Experts Feed Forward..
+    Implements a decoder block for the Mixtral model, which combines grouped rotary shifted window multi-head attention with a sparse mixture of experts for the feed-forward layer.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    This block is designed to capture both local and global dependencies in the text while efficiently scaling the model's capacity through the sparse mixture of experts. The use of grouped rotary shifted window attention allows for improved modeling of sequence context.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+        num_groups (int): Number of groups to split the heads into for applying rotary positional embeddings separately.
+        window_size (int): Size of each window for processing local context.
+        shift_size (int): Number of positions to shift the window at each layer to capture global context.
+
+    Methods:
+        setup(): Initializes the components of the Mixtral decoder block.
+        __call__(x, training): Processes the input tensor through the Mixtral decoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -775,18 +696,7 @@ class MixtralDecoderBlock(nn.Module):
     def __call__(self, 
                 x: jnp.ndarray,
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         x = self.norm1(x)
         attended_x, attention1 = self.attention1(x, x, mask=True)
         x = self.dropout1(x, deterministic=not training)
@@ -807,14 +717,25 @@ class MixtralDecoderBlock(nn.Module):
     
 class MixtralDecoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the Mixtral model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The decoder is composed of multiple MixtralDecoderBlocks, processing sequences of tokens to generate text. It includes an embedding layer to convert tokens into vectors and an output layer to predict the next token in the sequence.
+
+    Attributes:
+        num_layers (int): Number of MixtralDecoderBlocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        num_groups (int): Number of groups for the grouped rotary positional embeddings in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        window_size (int): Window size used in grouped rotary shifted window multi-head attention.
+        shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
+
+    Methods:
+        setup(): Initializes the components of the Mixtral decoder.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral decoder.
     """
     num_layers: int
     hidden_dim: int
@@ -846,19 +767,7 @@ class MixtralDecoder(nn.Module):
                  x: jnp.ndarray,
                  training: bool = False,
                  drop_last_layer: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -876,17 +785,110 @@ class MixtralDecoder(nn.Module):
 
 class Mixtral(nn.Module):
     """
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        hidden_dim (int): Dimensionality of input embeddings.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    Implements the Mixtral model for text generation, featuring grouped rotary shifted window multi-head attention and sparse mixture of experts.
+
+    Mixtral enhances the transformer architecture by incorporating grouped rotary positional embeddings within its decoder blocks and utilizing a shifted window strategy to better capture local and global sequence contexts. The addition of a sparse mixture of experts aims to efficiently scale the model's capacity.
+
+    Attributes:
+        num_layers (int): Number of layers (blocks) in the Mixtral model.
+        num_heads (int): Number of attention heads in each block.
+        num_groups (int): Number of groups for the grouped rotary positional embeddings in each block.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+        window_size (int): Window size used in grouped rotary shifted window multi-head attention.
+        shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
+
+    Methods:
+        setup(): Initializes the Mixtral model including the decoder component.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral model.
+        generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
+        generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
+    
+    Example usage:
+        ```
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Mixtral, MistralDataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length+1), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+            'num_groups': 2,
+            'window_size': 5,
+            'shift_size': 2
+        }
+
+        # Initialize model
+        model = Mixtral(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
     """
     num_layers: int
     num_heads: int
@@ -903,9 +905,6 @@ class Mixtral(nn.Module):
     shift_size: int
 
     def setup(self):
-        """
-        Initialize the Mistral model 
-        """
         self.decoder = MixtralDecoder(self.num_layers,
                                 self.hidden_dim,
                                 self.num_heads,
@@ -922,16 +921,11 @@ class Mixtral(nn.Module):
                  training: bool = False,
                  drop_last_layer: bool = False) -> jnp.ndarray:
         
-        """ 
-        Sequence-to-sequence models use teacher forcing during training and as such, 
-        the decoder input is the ground truth sequence.
-        """
         return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
     
     def zero_pad(self, arr, max_length):
-        """Zero-pad the given array to the specified maximum length along axis=1."""
         current_length = arr.shape[1]
         num_zeros = max_length - current_length
 
@@ -948,18 +942,7 @@ class Mixtral(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
 
@@ -992,18 +975,7 @@ class Mixtral(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
-
+        
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)

@@ -1,84 +1,3 @@
-'''
-Whisper uses an encoder-decoder Transformer (Vaswani et al., 2017) as this, All  audio is re-sampled to 16,000 Hz, and an 80-channel logmagnitude Mel spectrogram representation is computed on
-25-millisecond windows with a stride of 10 milliseconds. For feature normalization, we globally scale the input to be between -1 and 1 with approximately zero mean across
-the pre-training dataset. The encoder processes this input representation with a small stem consisting of two convolution layers with a filter width of 3 and the GELU activation
-function (Hendrycks & Gimpel, 2016) where the second convolution layer has a stride of two. Sinusoidal position embeddings are then added to the output of the stem after
-which the encoder Transformer blocks are applied. The transformer uses pre-activation residual blocks (Child et al., 2019), and a final layer normalization is applied to the encoder output. The decoder uses learned position embeddings
-and tied input-output token representations (Press & Wolf, 2017). The encoder and decoder have the same width and number of transformer blocks. Figure 1 summarizes the model architecture
-https://cdn.openai.com/papers/whisper.pdf
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import Whisper, WhisperDataParallelTrainer
-
-# Dummy data parameters
-batch_size = 8
-max_length = 50
-embed_dim = 256 
-vocab_size = 1000 
-
-# Generate data: replace with actual tokenised/quantised data
-dummy_targets = jnp.ones((101, max_length), dtype=jnp.int32)
-dummy_inputs = jnp.ones((101, max_length, embed_dim))
-
-dataset = ArrayDataset(dummy_inputs, 
-                       dummy_targets)
-
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': embed_dim,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = Whisper(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs, dummy_targets)['params']
-outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs)
-print(outputs.shape)
-
-# Training on your data
-trainer = WhisperDataParallelTrainer(model, 
-                                     dummy_inputs.shape, 
-                                     dummy_targets.shape, 
-                                     'params.pkl')
-trainer.train(dataloader, 2, dataloader)
-
-# Sample inference
-params = trainer.load_params('params.pkl')
-
-# for more than one sample, use model.generate_batch
-transcripts = model.apply({'params': params}, 
-                          dummy_inputs[:1], 
-                          rngs=rngs, 
-                          method=model.generate)
-
-print(transcripts)
-```
-'''
-
 import jax
 import flax
 import time
@@ -90,19 +9,18 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 
 class SpeechEmbedding(nn.Module):
+    """
+    Implements a speech embedding layer for processing audio signals.
+
+    This layer applies two convolutional operations followed by GELU activations to the input audio signals. The first convolution maintains the sequence length, while the second halves it. Additionally, it adds sinusoidal embeddings to capture positional information within the audio sequence.
+
+    Methods:
+        __call__(x): Processes the input audio tensor through the convolutional layers and adds sinusoidal embeddings.
+        sinusoidal_embedding(x, max_position): Generates sinusoidal embeddings based on the sequence length and hidden dimension of the input.
+    """
     @nn.compact
     def __call__(self, 
                  x: jnp.ndarray) -> jnp.ndarray:
-        """
-        Applies a convolutional encoder to the processed input tensor.
-        Read documentation for Whisper pre-processiing here: https://cdn.openai.com/papers/whisper.pdf
-
-        Args:
-            x (jax.numpy.ndarray): The input tensor to be processed.
-
-        Returns:
-            jax.numpy.ndarray: The output tensor after processing.
-        """
         x = nn.gelu(nn.Conv(features=x.shape[-1], kernel_size=(3,), padding='SAME')(x))
         x = nn.gelu(nn.Conv(features=x.shape[-1], kernel_size=(3,), strides=(2,), padding='SAME')(x))
         return jnp.concatenate((x, self.sinusoidal_embedding(x)), axis=-2)
@@ -110,17 +28,6 @@ class SpeechEmbedding(nn.Module):
     def sinusoidal_embedding(self,
                              x: jnp.ndarray, 
                              max_position: int = 10000) -> jnp.ndarray:
-        """
-        Adds sinusoidal embeddings to the input tensor.
-
-        Args:
-            x (jax.numpy.ndarray): The input tensor to be embedded.
-            max_position (int): The maximum position to consider for sinusoidal embeddings.
-            hidden_dim (int): The dimension of the hidden sinusoidal embeddings.
-
-        Returns:
-            jax.numpy.ndarray: The tensor with added sinusoidal embeddings.
-        """
         batch_size, seq_len, hidden_dim = x.shape
         positions = jnp.arange(seq_len)[:, None]
         angles = (jnp.arange(hidden_dim) / hidden_dim)[None, :]
@@ -298,36 +205,25 @@ class AddNorm(nn.Module):
                  X: jnp.ndarray, 
                  Y: jnp.ndarray, 
                  training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
     
 
 class WhisperSpeechEncoderBlock(nn.Module):
     """
-    Represents a single block in the transformer encoder.
+    Implements a single encoder block for the Whisper Speech model, combining self-attention with a feed-forward network.
 
-    Each encoder block consists of a multi-head self-attention layer and a position-wise feed-forward network. Both sublayers have residual connections and are followed by layer normalization.
+    The WhisperSpeechEncoderBlock processes the input through a multi-head self-attention mechanism, allowing each position to attend to all positions. This is followed by a position-wise feed-forward network. Layer normalization and dropout are applied for regularization.
 
     Attributes:
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
 
     Methods:
-        setup(): Initializes the attention, feed-forward network, and normalization layers.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
+        setup(): Initializes the components of the WhisperSpeechEncoderBlock.
+        __call__(x, mask, training): Processes the input tensor through the encoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -345,17 +241,7 @@ class WhisperSpeechEncoderBlock(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
+        
         attended_x, attention = self.attention(x, x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         linear_output = self.linear(x)
@@ -365,14 +251,20 @@ class WhisperSpeechEncoderBlock(nn.Module):
     
 class WhisperSpeechEncoder(nn.Module):
     """
-    Whisper Encoder.
+    Implements the encoder component of the Whisper Speech model.
 
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The WhisperSpeechEncoder processes input audio sequences through an embedding layer followed by multiple WhisperSpeechEncoderBlocks. It aims to capture complex patterns within the audio data by applying self-attention and feed-forward networks to the sequence of embeddings.
+
+    Attributes:
+        num_layers (int): Number of WhisperSpeechEncoderBlocks in the encoder.
+        hidden_dim (int): Dimensionality of the hidden features.
+        num_heads (int): Number of attention heads in the self-attention mechanism.
+        feedforward_dim (int): Dimensionality of the feedforward network within each encoder block.
+        dropout (float): Dropout rate used for regularization.
+
+    Methods:
+        setup(): Initializes the components of the WhisperSpeechEncoder.
+        __call__(x, mask, training): Processes the input audio tensor through the encoder, returning encoded features and attention maps.
     """
     num_layers: int
     hidden_dim: int
@@ -393,18 +285,7 @@ class WhisperSpeechEncoder(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the WhisperEncoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and list of attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -415,13 +296,19 @@ class WhisperSpeechEncoder(nn.Module):
 
 class WhisperTextDecoderBlock(nn.Module):
     """
-    Whisper Decoder Block.
+    Implements a single decoder block for the Transformer model, combining self-attention, encoder-decoder attention, and a feed-forward network.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    This block first processes the input through self-attention, allowing each position to attend to all positions up to and including itself. Then, it applies encoder-decoder attention, integrating information from the encoder's output. Finally, a position-wise feed-forward network is applied.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the Transformer decoder block.
+        __call__(x, context, training): Processes the input tensor through the decoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -440,17 +327,7 @@ class WhisperTextDecoderBlock(nn.Module):
                 batch_size: int, 
                 destination_dim: int, 
                 source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
+        
         # Create index tensors for the source and destination dimensions
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
@@ -465,18 +342,7 @@ class WhisperTextDecoderBlock(nn.Module):
                 x: jnp.ndarray, 
                 context: jnp.ndarray, 
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
 
         attended_x, attention1 = self.attention1(x, x)
@@ -493,15 +359,26 @@ class WhisperTextDecoderBlock(nn.Module):
 
 class WhisperTextDecoder(nn.Module):
     """
-    Whisper Decoder.
+    Implements the decoder component of the Transformer model.
 
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The Transformer decoder generates output sequences by processing input through multiple layers of TransformerDecoderBlocks. It incorporates context from the encoder at each layer to generate predictions.
+
+    Attributes:
+        num_layers (int): Number of TransformerDecoderBlocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        max_len (int): Maximum sequence length.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        learned_position (bool): Indicates if positional embeddings are learned or static.
+
+    Methods:
+        setup(): Initializes the components of the Transformer decoder.
+        __call__(x, context, training): Processes the input tensor through the decoder.
     """
+
     num_layers: int
     hidden_dim: int
     num_heads: int
@@ -531,19 +408,7 @@ class WhisperTextDecoder(nn.Module):
                  x: jnp.ndarray, 
                  context: jnp.ndarray, 
                  training: bool = False) -> tuple:
-        """
-        Apply the WhisperDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -556,17 +421,105 @@ class WhisperTextDecoder(nn.Module):
     
 class Whisper(nn.Module):
     """
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        hidden_dim (int): Dimensionality of input embeddings.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    Implements the Whisper model for speech-to-text tasks, such as speech recognition and transcription.
+
+    The Whisper model utilizes a specialized encoder for processing audio input and a decoder for generating textual output. The encoder captures complex patterns in the audio data using self-attention mechanisms, while the decoder generates corresponding text based on the encoded audio context.
+
+    Attributes:
+        num_layers (int): Number of layers in both the encoder and decoder.
+        num_heads (int): Number of attention heads in each layer.
+        hidden_dim (int): Dimensionality of the input and output features for the layers.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the layers.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated text sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+
+    Methods:
+        setup(): Initializes the Whisper model including both the encoder and decoder components.
+        __call__(x, y, training): Processes the input audio tensor through the Whisper model, generating textual predictions.
+        generate(x, temperature, deterministic): Generates textual output from input audio sequences.
+    
+    Whisper uses an encoder-decoder Transformer (Vaswani et al., 2017) as this, All  audio is re-sampled to 16,000 Hz, and an 80-channel logmagnitude Mel spectrogram representation is computed on
+    25-millisecond windows with a stride of 10 milliseconds. For feature normalization, we globally scale the input to be between -1 and 1 with approximately zero mean across
+    the pre-training dataset. The encoder processes this input representation with a small stem consisting of two convolution layers with a filter width of 3 and the GELU activation
+    function (Hendrycks & Gimpel, 2016) where the second convolution layer has a stride of two. Sinusoidal position embeddings are then added to the output of the stem after
+    which the encoder Transformer blocks are applied. The transformer uses pre-activation residual blocks (Child et al., 2019), and a final layer normalization is applied to the encoder output. The decoder uses learned position embeddings
+    and tied input-output token representations (Press & Wolf, 2017). The encoder and decoder have the same width and number of transformer blocks. Figure 1 summarizes the model architecture
+    https://cdn.openai.com/papers/whisper.pdf
+
+    Example usage:
+        ```py
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Whisper, WhisperDataParallelTrainer
+
+        # Dummy data parameters
+        batch_size = 8
+        max_length = 50
+        embed_dim = 256 
+        vocab_size = 1000 
+
+        # Generate data: replace with actual tokenised/quantised data
+        dummy_targets = jnp.ones((101, max_length), dtype=jnp.int32)
+        dummy_inputs = jnp.ones((101, max_length, embed_dim))
+
+        dataset = ArrayDataset(dummy_inputs, 
+                            dummy_targets)
+
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': embed_dim,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = Whisper(**hyperparams)
+        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+        params = model.init(rngs, dummy_inputs, dummy_targets)['params']
+        outputs = model.apply({'params': params}, dummy_inputs, dummy_targets, rngs=rngs)
+        print(outputs.shape)
+
+        # Training on your data
+        trainer = WhisperDataParallelTrainer(model, 
+                                            dummy_inputs.shape, 
+                                            dummy_targets.shape, 
+                                            'params.pkl')
+        trainer.train(dataloader, 2, dataloader)
+
+        # Sample inference
+        params = trainer.load_params('params.pkl')
+
+        # for more than one sample, use model.generate_batch
+        transcripts = model.apply({'params': params}, 
+                                dummy_inputs[:1], 
+                                rngs=rngs, 
+                                method=model.generate)
+
+        print(transcripts)
+        ```
     """
     num_layers: int
     num_heads: int
@@ -580,9 +533,6 @@ class Whisper(nn.Module):
     end_token: int
 
     def setup(self):
-        """
-        Initialize the Whisper model by setting up the encoder and decoder.
-        """
         self.encoder = WhisperSpeechEncoder(
             hidden_dim=self.hidden_dim,
             num_heads=self.num_heads,
@@ -607,10 +557,6 @@ class Whisper(nn.Module):
                  y: jnp.ndarray,
                  training: bool = False) -> jnp.ndarray:
         
-        """ 
-        Sequence-to-sequence models use teacher forcing during training and as such, 
-        the decoder input is the ground truth sequence.
-        """
         z = self.encoder(x=x, training=training)[0]
         return self.decoder(x=y, context=z, training=training)[0]
     
@@ -618,18 +564,7 @@ class Whisper(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         # Encode the input sequence
         encoded_sequence = self.encoder(x=x, training=False)[0]
 
@@ -664,17 +599,7 @@ class Whisper(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
+        
         # Encode the input sequence
         encoded_sequence = self.encoder(x=x, training=False)[0]
 

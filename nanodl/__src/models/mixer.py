@@ -1,65 +1,3 @@
-'''
-MLP Mixers are a recent architectural innovation in the field of deep learning, introduced to address the limitations of traditional Convolutional Neural Networks (CNNs) and Transformers. 
-The motivation behind MLP Mixers arises from the need to handle diverse data types and leverage multi-modal information efficiently. Unlike transformers that rely on self-attention mechanisms, 
-MLP Mixers employ a simple yet powerful approach using Multi-Layer Perceptrons (MLPs) to process data. This architecture is designed to work with sequences, images, or even a combination of both, 
-making it versatile for a wide range of tasks. MLP Mixers have demonstrated strong performance in various applications, including image classification, natural language understanding, and cross-modal learning, 
-showcasing their potential in handling different modalities and promoting model efficiency and scalability in deep learning.
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import Mixer, MixerDataParallelTrainer
-
-# Dummy data parameters
-batch_size = 8
-max_length = 50 
-n_outputs = 5  
-embed_dim = 256  
-patch_size = (16, 16)  
-
-# Generate data
-dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
-key = jax.random.PRNGKey(10)
-dummy_labels = jax.random.randint(key, 
-                                shape=(batch_size,), 
-                                minval=0, 
-                                maxval=n_outputs-1)
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, 
-                       dummy_labels)
-
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# model parameters
-hyperparams = {
-    "dropout": 0.1,
-    "num_heads": 2,
-    "feedforward_dim": embed_dim,
-    "patch_size": patch_size,
-    "hidden_dim": embed_dim,
-    "num_layers": 4,
-    "n_outputs": n_outputs
-}
-
-# Initialize model
-model = Mixer(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
-print(outputs.shape)
-
-# Training on your data
-trainer = MixerDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-```
-'''
-
 import jax
 import flax
 import time
@@ -114,10 +52,12 @@ class PatchEmbedding(nn.Module):
 
 class MixerBlock(nn.Module):
     """
-    Implements a single block of the MLP-Mixer architecture.
-    
-    Args:
-        dim (int): The dimensionality of the block's hidden layers.
+    Implements a single Mixer block, part of the MLP-Mixer architecture.
+
+    The Mixer block applies a two-step mixing process: the first step mixes per-location features across the channel dimension, and the second step mixes per-channel features across spatial locations. It aims to capture both channel-wise and spatial interactions within the input.
+
+    Methods:
+        __call__(x): Processes the input tensor through the Mixer block.
     """
     @nn.compact
     def __call__(self, x):
@@ -134,21 +74,21 @@ class MixerBlock(nn.Module):
 
 class MixerEncoder(nn.Module):
     """
-    Implements an MLP Mixer encoder for image processing.
+    Implements the encoder component of the MLP-Mixer model.
 
-    This module applies patch embedding to input images and then processes the resulting sequence of embedded patches through multiple transformer encoder blocks.
+    The MixerEncoder processes input images through an embedding layer followed by multiple MixerBlocks. It is designed to capture complex patterns within the data through repeated application of mixing operations.
 
     Attributes:
-        patch_size (tuple): Size of the patches (height, width) to be extracted from input images.
-        num_layers (int): Number of transformer encoder blocks.
-        hidden_dim (int): Dimensionality of the input and output features for the transformer encoder.
-        num_heads (int): Number of attention heads in the transformer encoder.
-        feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
+        patch_size (Tuple[int, int]): Size of the patches the image is divided into.
+        num_layers (int): Number of MixerBlocks in the encoder.
+        hidden_dim (int): Dimensionality of the hidden features.
+        num_heads (int): Number of attention heads (not directly used in MixerBlocks but kept for interface consistency).
+        feedforward_dim (int): Dimensionality of the feedforward network within the MixerBlock.
         dropout (float): Dropout rate for regularization.
 
     Methods:
-        setup(): Initializes the patch embedding and encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
+        setup(): Initializes the components of the MixerEncoder.
+        __call__(x, training): Processes the input tensor through the encoder.
     """
     patch_size: Tuple[int, int]
     num_layers: int
@@ -179,21 +119,83 @@ class MixerEncoder(nn.Module):
 
 class Mixer(nn.Module):
     """
-    Vision Transformer (Mixer) model for image classification.
+    Implements the MLP-Mixer model for image classification tasks.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    num_layers (int): Number of transformer encoder layers.
-    hidden_dim (int): Input dimension for the transformer encoder.
-    num_heads (int): Number of attention heads in the transformer encoder.
-    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
-    dropout (float): Dropout probability for regularization.
-    n_outputs (int): Number of output classes.
+    The MLP-Mixer model uses an architecture based entirely on multi-layer perceptrons (MLPs), avoiding conventional convolution or attention mechanisms. It divides the image into patches and applies MixerBlocks to mix information across spatial and channel dimensions.
 
-    Note: The transformer MLP blocks were designed to have a bottleneck
-          As such, the embeddining dim and feedforward dim should be the same to 
+    Attributes:
+        patch_size (Tuple[int, int]): Size of the patches the image is divided into.
+        num_layers (int): Number of MixerBlocks in the model.
+        hidden_dim (int): Dimensionality of the hidden features.
+        num_heads (int): Number of attention heads (not directly used in this model but kept for interface consistency).
+        feedforward_dim (int): Dimensionality of the feedforward network within the MixerBlock.
+        dropout (float): Dropout rate for regularization.
+        n_outputs (int): Number of output classes.
+
+    Methods:
+        setup(): Initializes the components of the Mixer model.
+        __call__(x, training): Processes the input tensor through the model and produces class logits.
+    
+    MLP Mixers are a recent architectural innovation in the field of deep learning, introduced to address the limitations of traditional Convolutional Neural Networks (CNNs) and Transformers. 
+    The motivation behind MLP Mixers arises from the need to handle diverse data types and leverage multi-modal information efficiently. Unlike transformers that rely on self-attention mechanisms, 
+    MLP Mixers employ a simple yet powerful approach using Multi-Layer Perceptrons (MLPs) to process data. This architecture is designed to work with sequences, images, or even a combination of both, 
+    making it versatile for a wide range of tasks. MLP Mixers have demonstrated strong performance in various applications, including image classification, natural language understanding, and cross-modal learning, 
+    showcasing their potential in handling different modalities and promoting model efficiency and scalability in deep learning.
+
+    Example usage:
+        ```
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Mixer, MixerDataParallelTrainer
+
+        # Dummy data parameters
+        batch_size = 8
+        max_length = 50 
+        n_outputs = 5  
+        embed_dim = 256  
+        patch_size = (16, 16)  
+
+        # Generate data
+        dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
+        key = jax.random.PRNGKey(10)
+        dummy_labels = jax.random.randint(key, 
+                                        shape=(batch_size,), 
+                                        minval=0, 
+                                        maxval=n_outputs-1)
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, 
+                            dummy_labels)
+
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # model parameters
+        hyperparams = {
+            "dropout": 0.1,
+            "num_heads": 2,
+            "feedforward_dim": embed_dim,
+            "patch_size": patch_size,
+            "hidden_dim": embed_dim,
+            "num_layers": 4,
+            "n_outputs": n_outputs
+        }
+
+        # Initialize model
+        model = Mixer(**hyperparams)
+        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+        params = model.init(rngs, dummy_inputs)['params']
+        outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
+        print(outputs.shape)
+
+        # Training on your data
+        trainer = MixerDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(dataloader, 10, dataloader)
+        ```
     """
-
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -203,11 +205,6 @@ class Mixer(nn.Module):
     n_outputs: int
 
     def setup(self):
-        """
-        Setup the Mixer model architecture by initializing its components.
-
-        Initializes the embedding layer, transformer encoder blocks, and the output layer.
-        """
         self.encoder = MixerEncoder(
             patch_size=self.patch_size,
             num_layers=self.num_layers,
@@ -222,20 +219,8 @@ class Mixer(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  training: bool = False) -> tuple:
-        """
-        Apply the Mixer model to input data.
-
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Predicted class scores for each input sample.
-        jax.numpy.ndarray: Attention maps from the transformer encoder.
-        """
         x = self.encoder(x=x, training=training)
         x = self.dropout_layer(x, deterministic=not training)
-
-        # perform cls pooling and return logits
         return self.output(x[:,0,:]), x
 
 

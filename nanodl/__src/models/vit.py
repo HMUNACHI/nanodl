@@ -1,68 +1,3 @@
-'''
-Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning. 
-The motivation behind Vision Transformers lies in the desire to extend the success of transformers, 
-originally designed for natural language processing, to visual data. These models aim to replace 
-or complement traditional Convolutional Neural Networks (CNNs) in image-related tasks. ViTs employ a self-attention mechanism 
-to capture global dependencies among pixels or patches of an image, which helps them understand context and relationships between different regions effectively. 
-By utilizing pretraining on large-scale image datasets, ViTs have achieved remarkable performance in image classification, object detection, image generation, and various other computer vision tasks. 
-Their modular design, scalability, and ability to handle both local and global information have made Vision Transformers a significant advancement in the field, 
-offering promising avenues for future research and applications in computer vision.
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import ViT, ViTDataParallelTrainer
-
-# Dummy data parameters
-batch_size = 8
-max_length = 50 
-n_outputs = 5  
-embed_dim = 256  
-patch_size = (16, 16)  
-
-# Generate data
-dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
-key = jax.random.PRNGKey(10)
-dummy_labels = jax.random.randint(key, 
-                                shape=(batch_size,), 
-                                minval=0, 
-                                maxval=n_outputs-1)
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, 
-                       dummy_labels)
-
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# model parameters
-hyperparams = {
-    "dropout": 0.1,
-    "num_heads": 2,
-    "feedforward_dim": embed_dim,
-    "patch_size": patch_size,
-    "hidden_dim": embed_dim,
-    "num_layers": 4,
-    "n_outputs": n_outputs
-}
-
-# Initialize model
-model = ViT(**hyperparams)
-rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-params = model.init(rngs, dummy_inputs)['params']
-outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
-print(outputs.shape)
-
-# Training on your data
-trainer = ViTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(dataloader, 10, dataloader)
-```
-'''
-
 import jax
 import time
 import flax
@@ -322,21 +257,85 @@ class ViTEncoder(nn.Module):
 
 class ViT(nn.Module):
     """
-    Vision Transformer (ViT) model for image classification.
+    Implements the encoder component of the Vision Transformer (ViT) model.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    num_layers (int): Number of transformer encoder layers.
-    hidden_dim (int): Input dimension for the transformer encoder.
-    num_heads (int): Number of attention heads in the transformer encoder.
-    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
-    dropout (float): Dropout probability for regularization.
-    n_outputs (int): Number of output classes.
+    The ViTEncoder processes input images divided into patches through multiple Transformer encoder layers. It aims to capture complex patterns within the data by applying self-attention and feed-forward networks to the sequence of patches.
 
-    Note: The transformer MLP blocks were designed to have a bottleneck
-          As such, the embeddining dim and feedforward dim should be the same to 
+    Attributes:
+        patch_size (Tuple[int, int]): Size of the patches the image is divided into.
+        num_layers (int): Number of Transformer encoder layers in the encoder.
+        hidden_dim (int): Dimensionality of the hidden features.
+        num_heads (int): Number of attention heads in the self-attention mechanism.
+        feedforward_dim (int): Dimensionality of the feedforward network within each Transformer encoder layer.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the ViTEncoder.
+        __call__(x, mask, training): Processes the input tensor through the encoder, returning encoded features and attention maps.
+    
+    Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning. 
+    The motivation behind Vision Transformers lies in the desire to extend the success of transformers, 
+    originally designed for natural language processing, to visual data. These models aim to replace 
+    or complement traditional Convolutional Neural Networks (CNNs) in image-related tasks. ViTs employ a self-attention mechanism 
+    to capture global dependencies among pixels or patches of an image, which helps them understand context and relationships between different regions effectively. 
+    By utilizing pretraining on large-scale image datasets, ViTs have achieved remarkable performance in image classification, object detection, image generation, and various other computer vision tasks. 
+    Their modular design, scalability, and ability to handle both local and global information have made Vision Transformers a significant advancement in the field, 
+    offering promising avenues for future research and applications in computer vision.
+
+    Example usage:
+        ```py
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import ViT, ViTDataParallelTrainer
+
+        # Dummy data parameters
+        batch_size = 8
+        max_length = 50 
+        n_outputs = 5  
+        embed_dim = 256  
+        patch_size = (16, 16)  
+
+        # Generate data
+        dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
+        key = jax.random.PRNGKey(10)
+        dummy_labels = jax.random.randint(key, 
+                                        shape=(batch_size,), 
+                                        minval=0, 
+                                        maxval=n_outputs-1)
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, 
+                            dummy_labels)
+
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # model parameters
+        hyperparams = {
+            "dropout": 0.1,
+            "num_heads": 2,
+            "feedforward_dim": embed_dim,
+            "patch_size": patch_size,
+            "hidden_dim": embed_dim,
+            "num_layers": 4,
+            "n_outputs": n_outputs
+        }
+
+        # Initialize model
+        model = ViT(**hyperparams)
+        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
+        params = model.init(rngs, dummy_inputs)['params']
+        outputs = model.apply({'params': params}, dummy_inputs, rngs=rngs)[0]
+        print(outputs.shape)
+
+        # Training on your data
+        trainer = ViTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(dataloader, 10, dataloader)
+        ```
     """
-
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -364,8 +363,6 @@ class ViT(nn.Module):
         
         x, attention_maps = self.encoder(x=x, mask=mask, training=training)
         x = self.dropout_layer(x, deterministic=not training)
-
-        # perform cls pooling and return logits
         return self.output(x[:,0,:]), x, attention_maps
 
 

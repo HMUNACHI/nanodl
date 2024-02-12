@@ -1,98 +1,3 @@
-'''
-T5, which stands for Text-to-Text Transfer Transformer, is an influential deep learning architecture introduced by Google Research. 
-Its motivation stems from the idea of unifying various natural language processing tasks into a single framework to achieve greater model simplicity and efficiency. 
-T5 reimagines tasks as text-to-text problems, where both inputs and outputs are represented as text. 
-This consistent formulation allows T5 to perform an astonishingly wide range of tasks, 
-from translation and summarization to question-answering and document classification, by adjusting the input and output formats accordingly.
-The architecture is roughly equivalent to the original Transformer proposed by
-Vaswani et al. (2017) with the exception of removing the Layer Norm bias, placing the layer
-normalization outside the residual path, and using a different position embedding scheme.
-
-Example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import T5, T5DataParallelTrainer
-
-# Generate dummy data
-batch_size = 8
-max_length = 10
-
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length+1), dtype=jnp.int32)
-
-# Shift to create next-token prediction dataset
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = T5(**hyperparams)
-rngs = jax.random.PRNGKey(0)
-rngs, dropout_rng = jax.random.split(rngs)
-params = model.init({'params': rngs, 'dropout': dropout_rng}, 
-                    dummy_inputs,
-                    dummy_targets)['params']
-
-# Call as you would a Jax/Flax model
-outputs = model.apply({'params': params}, 
-                      dummy_inputs, 
-                      dummy_targets,
-                      rngs={'dropout': dropout_rng})
-print(outputs.shape)
-
-# Training on data
-trainer = T5DataParallelTrainer(model, 
-                                dummy_inputs.shape, 
-                                dummy_targets.shape,
-                                'params.pkl')
-
-trainer.train(train_loader=dataloader, 
-              num_epochs=2, 
-              val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
-start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-print(outputs)
-```
-'''
-
 import jax
 import flax
 import time
@@ -104,6 +9,20 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 
 class RelativeMultiHeadAttention(nn.Module):
+    """
+    Implements relative multi-head attention mechanism for transformers.
+
+    This module enhances the transformer architecture by incorporating relative position information directly into the attention mechanism, allowing the model to better capture sequence order and dependencies based on the relative positions of tokens.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads.
+
+    Methods:
+        setup(): Initializes the projections for query, key, value, and output.
+        __call__(inputs, context, mask, clip): Processes the input and context tensors through the relative multi-head attention mechanism.
+        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors, incorporating relative position information.
+    """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
 
@@ -132,17 +51,6 @@ class RelativeMultiHeadAttention(nn.Module):
                  mask: jnp.ndarray = None, 
                  clip: int = 3) -> tuple:
 
-        """
-        Args:
-            inputs: inputs ((batch_size, seq_len, dims))
-            context: optional - context ((batch_size, seq_len, dims))
-            clip: the k value at which to clip the relative position by
-            Mask: optional - masks where reqions to ignore are flipped to os
-                  regions to attend to are 1s (batch_size, seq_len, dims)
-
-        Return: outputs (batch_size, seq_len, seq_len)
-                attention matrixes (batch_size, heads, seq_len, seq_len)
-        """
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
@@ -235,19 +143,19 @@ class AddNorm(nn.Module):
 
 class T5EncoderBlock(nn.Module):
     """
-    Represents a single block in the transformer encoder.
+    Implements a single encoder block for the T5 model, combining self-attention with feed-forward layers.
 
-    Each encoder block consists of a multi-head self-attention layer and a position-wise feed-forward network. Both sublayers have residual connections and are followed by layer normalization.
+    The T5 encoder block utilizes relative multi-head attention to incorporate contextual information, followed by a position-wise feed-forward network. Layer normalization and dropout are applied for regularization.
 
     Attributes:
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
 
     Methods:
-        setup(): Initializes the attention, feed-forward network, and normalization layers.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
+        setup(): Initializes the components of the T5 encoder block.
+        __call__(x, mask, training): Processes the input tensor through the encoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -275,24 +183,22 @@ class T5EncoderBlock(nn.Module):
     
 class T5Encoder(nn.Module):
     """
-    Implements a transformer encoder for text.
+    Implements the encoder component of the T5 model.
 
-    This module combines an embedding layer (with optional learned positional encodings) with multiple encoder blocks to process sequences of text.
+    The T5 encoder processes input sequences through multiple layers of T5EncoderBlocks, capturing complex dependencies within the data. It utilizes an embedding layer to convert input tokens into vectors.
 
     Attributes:
-        num_layers (int): Number of encoder blocks in the transformer.
-        hidden_dim (int): Dimensionality of the input and output features.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
-        max_len (int): Maximum length of the input sequences.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimension of the embeddings.
-        learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
+        num_layers (int): Number of T5EncoderBlocks in the encoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
 
     Methods:
-        setup(): Initializes the embedding layer and the encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the transformer encoder.
+        setup(): Initializes the components of the T5 encoder.
+        __call__(x, mask, training): Processes the input tensor through the encoder.
     """
     num_layers: int
     hidden_dim: int
@@ -328,13 +234,19 @@ class T5Encoder(nn.Module):
 
 class T5DecoderBlock(nn.Module):
     """
-    Transformer Decoder Block.
+    Implements a single decoder block for the T5 model, incorporating self-attention and encoder-decoder attention.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    The T5 decoder block extends the encoder block structure by adding a second layer of relative multi-head attention to integrate information from the encoder's output. This allows the decoder to generate contextually relevant output sequences.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the T5 decoder block.
+        __call__(x, context, training): Processes the input tensor through the decoder block, incorporating context from the encoder.
     """
     hidden_dim: int
     num_heads: int
@@ -353,17 +265,7 @@ class T5DecoderBlock(nn.Module):
                 batch_size: int, 
                 destination_dim: int, 
                 source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
+        
         # Create index tensors for the source and destination dimensions
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
@@ -378,18 +280,7 @@ class T5DecoderBlock(nn.Module):
                 x: jnp.ndarray, 
                 context: jnp.ndarray, 
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         mask = self.causal_mask(x.shape[0], x.shape[1], context.shape[1])
 
         attended_x, attention1 = self.attention1(x, x)
@@ -406,14 +297,22 @@ class T5DecoderBlock(nn.Module):
 
 class T5Decoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the T5 model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The T5 decoder generates output sequences by processing input through multiple layers of T5DecoderBlocks. It uses an embedding layer for input tokens and incorporates context from the encoder to generate predictions.
+
+    Attributes:
+        num_layers (int): Number of T5DecoderBlocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+
+    Methods:
+        setup(): Initializes the components of the T5 decoder.
+        __call__(x, context, training): Processes the input tensor through the decoder, incorporating context from the encoder.
     """
     num_layers: int
     hidden_dim: int
@@ -440,19 +339,7 @@ class T5Decoder(nn.Module):
                  x: jnp.ndarray, 
                  context: jnp.ndarray, 
                  training: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -465,17 +352,120 @@ class T5Decoder(nn.Module):
     
 class T5(nn.Module):
     """
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        hidden_dim (int): Dimensionality of input embeddings.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    Implements the T5 model for text-to-text tasks, such as translation, summarization, and question answering.
+
+    T5 is a transformer-based model that utilizes an encoder-decoder architecture. The encoder captures contextual information from the input, and the decoder generates output sequences based on this context.
+
+    Attributes:
+        num_layers (int): Number of layers in both the encoder and decoder.
+        num_heads (int): Number of attention heads in each layer.
+        hidden_dim (int): Dimensionality of the input and output features for the layers.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the layers.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+
+    Methods:
+        setup(): Initializes the T5 model including both the encoder and decoder components.
+        __call__(x, y, training): Processes the input tensor through the T5 model, generating predictions.
+        generate(x, temperature, deterministic): Generates output sequences from input sequences.
+        generate_batch(x, temperature, deterministic): Generates output sequences for a batch of input sequences.
+    
+    T5, which stands for Text-to-Text Transfer Transformer, is an influential deep learning architecture introduced by Google Research. 
+    Its motivation stems from the idea of unifying various natural language processing tasks into a single framework to achieve greater model simplicity and efficiency. 
+    T5 reimagines tasks as text-to-text problems, where both inputs and outputs are represented as text. 
+    This consistent formulation allows T5 to perform an astonishingly wide range of tasks, 
+    from translation and summarization to question-answering and document classification, by adjusting the input and output formats accordingly.
+    The architecture is roughly equivalent to the original Transformer proposed by
+    Vaswani et al. (2017) with the exception of removing the Layer Norm bias, placing the layer
+    normalization outside the residual path, and using a different position embedding scheme.
+
+    Example usage:
+        ```
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import T5, T5DataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length+1), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = T5(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, 
+                            dummy_inputs,
+                            dummy_targets)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            dummy_targets,
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = T5DataParallelTrainer(model, 
+                                        dummy_inputs.shape, 
+                                        dummy_targets.shape,
+                                        'params.pkl')
+
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
     """
     num_layers: int
     num_heads: int
@@ -489,9 +479,6 @@ class T5(nn.Module):
     end_token: int
 
     def setup(self):
-        """
-        Initialize the T5 model by setting up the encoder and decoder.
-        """
         self.encoder = T5Encoder(self.num_layers,
                                 self.hidden_dim,
                                 self.num_heads,
@@ -513,10 +500,6 @@ class T5(nn.Module):
                  y: jnp.ndarray,
                  training: bool = False) -> jnp.ndarray:
         
-        """ 
-        Sequence-to-sequence models use teacher forcing during training and as such, 
-        the decoder input is the ground truth sequence.
-        """
         z = self.encoder(x=x, training=training)[0]
         return self.decoder(x=y, context=z, training=training)[0]
     
@@ -525,18 +508,7 @@ class T5(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+    
         encoded_sequence = self.encoder(x=x, training=False)[0]
         decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
@@ -570,17 +542,7 @@ class T5(nn.Module):
                  x: jnp.ndarray,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
+        
         # Encode the input sequence
         encoded_sequence = self.encoder(x=x, training=False)[0]
 

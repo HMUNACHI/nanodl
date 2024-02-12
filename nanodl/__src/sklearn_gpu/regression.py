@@ -13,7 +13,7 @@ class LinearRegression:
     Methods:
     - linear_regression(params, x): Linear regression prediction function.
     - loss(params, x, y): Mean squared error loss function.
-    - train(x_data, y_data, learning_rate=0.1, num_epochs=100): Training function.
+    - fit(x_data, y_data, learning_rate=0.1, num_epochs=100): Training function.
     - get_params(): Get the learned weights and bias.
 
     Example usage:
@@ -26,7 +26,7 @@ class LinearRegression:
     y_data = jnp.dot(x_data, jnp.array([[2.0]])) - jnp.array([[-1.0]])
 
     lr_model = LinearRegression(input_dim, output_dim)
-    lr_model.train(x_data, y_data)
+    lr_model.fit(x_data, y_data)
 
     learned_weights, learned_bias = lr_model.get_params()
     print("Learned Weights:", learned_weights)
@@ -40,47 +40,14 @@ class LinearRegression:
         self.params = (jnp.zeros((input_dim, output_dim)), jnp.zeros((output_dim,)))
 
     def linear_regression(self, params, x):
-        """
-        Compute the linear regression prediction.
-
-        Args:
-        - params (tuple): Model parameters (weights, bias).
-        - x (jax.numpy.ndarray): Input data.
-
-        Returns:
-        - jax.numpy.ndarray: Predicted output.
-        """
         weights, bias = params
         return jnp.dot(x, weights) + bias
 
     def loss(self, params, x, y):
-        """
-        Calculate the mean squared error loss.
-
-        Args:
-        - params (tuple): Model parameters (weights, bias).
-        - x (jax.numpy.ndarray): Input data.
-        - y (jax.numpy.ndarray): Target data.
-
-        Returns:
-        - float: Mean squared error loss.
-        """
         predictions = self.linear_regression(params, x)
         return jnp.mean((predictions - y) ** 2)
 
-    def train(self, x_data, y_data, learning_rate=0.1, num_epochs=100):
-        """
-        Train the linear regression model.
-
-        Args:
-        - x_data (jax.numpy.ndarray): Input data.
-        - y_data (jax.numpy.ndarray): Target data.
-        - learning_rate (float): Learning rate for gradient descent.
-        - num_epochs (int): Number of training epochs.
-
-        Returns:
-        - None
-        """
+    def fit(self, x_data, y_data, learning_rate=0.1, num_epochs=100):
         grad_loss = jax.grad(self.loss)
         for epoch in range(num_epochs):
             grads = grad_loss(self.params, x_data, y_data)
@@ -95,12 +62,6 @@ class LinearRegression:
         print("Training completed.")
 
     def get_params(self):
-        """
-        Get the learned weights and bias.
-
-        Returns:
-        - tuple: Learned weights and bias.
-        """
         return self.params
     
 
@@ -116,25 +77,25 @@ class LogisticRegression:
     - sigmoid(x): Sigmoid activation function.
     - logistic_regression(params, x): Logistic regression prediction function.
     - loss(params, x, y): Binary cross-entropy loss function.
-    - train(x_data, y_data, learning_rate=0.1, num_epochs=100): Training function.
+    - fit(x_data, y_data, learning_rate=0.1, num_epochs=100): Training function.
     - predict(x_data): Predict probabilities using the trained model.
 
     Example usage:
-    ```
-    num_samples = 100
-    input_dim = 2
+        ```
+        num_samples = 100
+        input_dim = 2
 
-    x_data = jax.random.normal(random.PRNGKey(0), (num_samples, input_dim))
-    logits = jnp.dot(x_data, jnp.array([0.5, -0.5])) - 0.1
-    y_data = (logits > 0).astype(jnp.float32)
+        x_data = jax.random.normal(random.PRNGKey(0), (num_samples, input_dim))
+        logits = jnp.dot(x_data, jnp.array([0.5, -0.5])) - 0.1
+        y_data = (logits > 0).astype(jnp.float32)
 
-    lr_model = LogisticRegression(input_dim)
-    lr_model.train(x_data, y_data)
+        lr_model = LogisticRegression(input_dim)
+        lr_model.fit(x_data, y_data)
 
-    test_data = jax.random.normal(random.PRNGKey(0), (num_samples, input_dim))
-    predictions = lr_model.predict(test_data)
-    print("Predictions:", predictions)
-    ```
+        test_data = jax.random.normal(random.PRNGKey(0), (num_samples, input_dim))
+        predictions = lr_model.predict(test_data)
+        print("Predictions:", predictions)
+        ```
     """
     def __init__(self, input_dim):
         self.input_dim = input_dim
@@ -142,59 +103,17 @@ class LogisticRegression:
         self.params = (jnp.zeros((input_dim,)), jnp.zeros(()))
 
     def sigmoid(self, x):
-        """
-        Sigmoid activation function.
-
-        Args:
-        - x (jax.numpy.ndarray): Input values.
-
-        Returns:
-        - jax.numpy.ndarray: Sigmoid activations.
-        """
         return 1.0 / (1.0 + jnp.exp(-x))
 
     def logistic_regression(self, params, x):
-        """
-        Compute the logistic regression prediction.
-
-        Args:
-        - params (tuple): Model parameters (weights, bias).
-        - x (jax.numpy.ndarray): Input data.
-
-        Returns:
-        - jax.numpy.ndarray: Predicted probabilities.
-        """
         weights, bias = params
         return self.sigmoid(jnp.dot(x, weights) + bias)
 
     def loss(self, params, x, y):
-        """
-        Calculate the binary cross-entropy loss.
-
-        Args:
-        - params (tuple): Model parameters (weights, bias).
-        - x (jax.numpy.ndarray): Input data.
-        - y (jax.numpy.ndarray): Binary target data (0 or 1).
-
-        Returns:
-        - float: Binary cross-entropy loss.
-        """
         predictions = self.logistic_regression(params, x)
         return -jnp.mean(y * jnp.log(predictions) + (1 - y) * jnp.log(1 - predictions))
 
-    def train(self, x_data, y_data, learning_rate=0.1, num_epochs=100):
-        """
-        Train the logistic regression model.
-
-        Args:
-        - x_data (jax.numpy.ndarray): Input data.
-        - y_data (jax.numpy.ndarray): Binary target data (0 or 1).
-        - learning_rate (float): Learning rate for gradient descent.
-        - num_epochs (int): Number of training epochs.
-
-        Returns:
-        - None
-        """
+    def fit(self, x_data, y_data, learning_rate=0.1, num_epochs=100):
         grad_loss = jax.grad(self.loss)
         for epoch in range(num_epochs):
             grads = grad_loss(self.params, x_data, y_data)
@@ -209,15 +128,6 @@ class LogisticRegression:
         print("Training completed.")
 
     def predict(self, x_data):
-        """
-        Predict probabilities using the trained model.
-
-        Args:
-        - x_data (jax.numpy.ndarray): Input data.
-
-        Returns:
-        - jax.numpy.ndarray: Predicted probabilities.
-        """
         return self.logistic_regression(self.params, x_data)
     
 
@@ -258,13 +168,7 @@ class GaussianProcess:
     def __init__(self, 
                  kernel: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], 
                  noise: float = 1e-3):
-        """
-        Initialize the GaussianProcess.
-
-        Args:
-            kernel (Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]): The kernel function.
-            noise (float, optional): Measurement noise added to the diagonal of the kernel matrix.
-        """
+        
         self.kernel = kernel
         self.noise = noise
         self.X = None
@@ -274,31 +178,13 @@ class GaussianProcess:
     def fit(self, 
             X: jnp.ndarray, 
             y: jnp.ndarray) -> None:
-        """
-        Fit the Gaussian Process model to the training data.
-
-        Args:
-            X (jnp.ndarray): Training input data.
-            y (jnp.ndarray): Training output data.
-
-        Returns:
-            None
-        """
+        
         self.X = X
         self.y = y
         self.K = self.kernel(self.X, self.X) + jnp.eye(len(X)) * self.noise
 
     def predict(self, 
                 X_new: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Make predictions for new input points.
-
-        Args:
-            X_new (jnp.ndarray): New input points.
-
-        Returns:
-            Tuple[jnp.ndarray, jnp.ndarray]: Predicted mean and covariance matrix for the new input points.
-        """
         K_inv = jnp.linalg.inv(self.K)
         K_s = self.kernel(self.X, X_new)
         K_ss = self.kernel(X_new, X_new)

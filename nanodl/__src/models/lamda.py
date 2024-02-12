@@ -1,94 +1,3 @@
-'''
-LaMBDA, which stands for "Language Model for Dialogue Applications," is a deep learning model developed by Google. 
-Its primary motivation lies in addressing the limitations of existing conversational AI models, such as GPT-3, 
-by explicitly targeting dialogue applications. LaMBDA's architecture is designed to excel in multi-turn conversations, 
-offering improvements in several key aspects. It incorporates features like context windowing, which enables it to remember and track information over longer dialogues, 
-and provides better control over generating detailed responses. LaMBDA also introduces a more controllable prompt engineering mechanism, 
-allowing users to instruct the model more precisely for various dialogue tasks. Overall, LaMBDA represents a significant step forward in the development of conversational AI models, 
-offering enhanced performance and usability in real-world dialogue applications.
-
-Note: 
-This is the architecture for LaMDA itself for now, the system is a lot more complex. At inference, LaMDA makes use of a single model to perform multiple tasks.
-it generates potential responses, which are then filtered for safety, grounded on an external knowledge source, and re-ranked to find the highest-quality response.
-
-Example Usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import LaMDA, LaMDADataParallelTrainer
-
-# Generate dummy data
-batch_size = 8
-max_length = 10
-
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length), dtype=jnp.int32)
-
-# Shift to create next-token prediction dataset
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = LaMDA(**hyperparams)
-rngs = jax.random.PRNGKey(0)
-rngs, dropout_rng = jax.random.split(rngs)
-params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
-
-# Call as you would a Jax/Flax model
-outputs = model.apply({'params': params}, 
-                      dummy_inputs, 
-                      rngs={'dropout': dropout_rng})
-print(outputs.shape)
-
-# Training on data
-trainer = LaMDADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(train_loader=dataloader, 
-              num_epochs=2, 
-              val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
-start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-print(outputs)
-```
-'''
-
 import jax
 import flax
 import time
@@ -100,7 +9,20 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 
 class RelativeMultiHeadAttention(nn.Module):
-    
+    """
+    Implements relative multi-head attention mechanism for transformers.
+
+    This module enhances the transformer architecture by incorporating relative position information directly into the attention mechanism, allowing the model to better capture sequence order and dependencies based on the relative positions of tokens.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads.
+
+    Methods:
+        setup(): Initializes the projections for query, key, value, and output.
+        __call__(inputs, context, mask, clip): Processes the input and context tensors through the relative multi-head attention mechanism.
+        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors, incorporating relative position information.
+    """
     hidden_dim : int 
     num_heads : int 
 
@@ -242,13 +164,20 @@ class GEGLU(nn.Module):
 
 class LaMDABlock(nn.Module):
     """
-    Transformer Decoder Block.
+    Implements a transformer block for LaMDA with self-attention and feed-forward layers.
 
-    Args:
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    This block is designed for the LaMDA model, focusing on generating conversational responses. It uses relative multi-head attention to incorporate positional information in a more nuanced way compared to traditional self-attention mechanisms.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads in the multi-head self-attention mechanism.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the LaMDA block.
+        causal_mask(batch_size, destination_dim, source_dim): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism.
+        __call__(x, mask, training): Processes the input tensor through the LaMDA block.
     """
     hidden_dim: int
     num_heads: int
@@ -267,17 +196,7 @@ class LaMDABlock(nn.Module):
                 batch_size: int, 
                 destination_dim: int, 
                 source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for self-attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
+        
         # Create index tensors for the source and destination dimensions
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
@@ -292,18 +211,7 @@ class LaMDABlock(nn.Module):
                 x: jnp.ndarray,
                 mask: jnp.ndarray = None, 
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            context (jnp.ndarray): Context tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
 
         attended_x, attention1 = self.attention1(x, x, mask=mask)
@@ -320,14 +228,22 @@ class LaMDABlock(nn.Module):
 
 class LaMDADecoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the LaMDA model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The decoder is composed of multiple LaMDA blocks, processing sequences of tokens to generate conversational text. It includes an embedding layer to convert tokens into vectors and an output layer to predict the next token in the sequence.
+
+    Attributes:
+        num_layers (int): Number of LaMDA blocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each LaMDA block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+
+    Methods:
+        setup(): Initializes the components of the LaMDA decoder.
+        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the LaMDA decoder.
     """
     num_layers: int
     hidden_dim: int
@@ -354,18 +270,7 @@ class LaMDADecoder(nn.Module):
                  mask: jnp.ndarray = None, 
                  training: bool = False,
                  drop_last_layer: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -382,19 +287,116 @@ class LaMDADecoder(nn.Module):
 
 class LaMDA(nn.Module):
     """
-    Decoder-only model
+    Implements the LaMDA model for generating conversational responses.
 
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        hidden_dim (int): Dimensionality of input embeddings.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+    LaMDA is designed for conversational applications, leveraging the transformer architecture to generate high-quality text responses. It uses relative multi-head attention within its transformer blocks to account for the positional context of words more effectively.
+
+    Attributes:
+        num_layers (int): Number of layers (blocks) in the LaMDA model.
+        num_heads (int): Number of attention heads in each block.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (float): Size of the vocabulary.
+        embed_dim (float): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+
+    Methods:
+        setup(): Initializes the LaMDA model including the decoder component.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the LaMDA model.
+        generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
+        generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
+
+    LaMBDA, which stands for "Language Model for Dialogue Applications," is a deep learning model developed by Google. 
+    Its primary motivation lies in addressing the limitations of existing conversational AI models, such as GPT-3, 
+    by explicitly targeting dialogue applications. LaMBDA's architecture is designed to excel in multi-turn conversations, 
+    offering improvements in several key aspects. It incorporates features like context windowing, which enables it to remember and track information over longer dialogues, 
+    and provides better control over generating detailed responses. LaMBDA also introduces a more controllable prompt engineering mechanism, 
+    allowing users to instruct the model more precisely for various dialogue tasks. Overall, LaMBDA represents a significant step forward in the development of conversational AI models, 
+    offering enhanced performance and usability in real-world dialogue applications.
+
+    Note: 
+    This is the architecture for LaMDA itself for now, the system is a lot more complex. At inference, LaMDA makes use of a single model to perform multiple tasks.
+    it generates potential responses, which are then filtered for safety, grounded on an external knowledge source, and re-ranked to find the highest-quality response.
+
+    Example Usage:
+        ```py
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import LaMDA, LaMDADataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = LaMDA(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = LaMDADataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
     """
     num_layers: int
     num_heads: int
@@ -408,9 +410,6 @@ class LaMDA(nn.Module):
     end_token: int
 
     def setup(self):
-        """
-        Initialize the T5 model by setting up the encoder and decoder.
-        """
         self.decoder = LaMDADecoder(self.num_layers,
                                     self.hidden_dim,
                                     self.num_heads,
@@ -424,10 +423,6 @@ class LaMDA(nn.Module):
                  training: bool = False,
                  drop_last_layer: bool = False) -> jnp.ndarray:
         
-        """ 
-        Causal models are trained differently, the outputs are just the inputs shifted by 1
-        While the generation is autoregressve, hence a different function for that
-        """
         return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
@@ -437,18 +432,7 @@ class LaMDA(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
             
@@ -481,18 +465,7 @@ class LaMDA(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
-
+        
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)

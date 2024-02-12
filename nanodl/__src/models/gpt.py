@@ -1,95 +1,3 @@
-'''
-The motivation behind GPT is to create a highly effective language model that can understand and generate human-like text. 
-Its architecture is a decoder-only transformer trained on next-token prediction and generates autoregressively duting training.
-It's pre-trained on a massive amount of text data, which allows it to learn the patterns and nuances of language. 
-GPT's strength lies in its ability to generalize this knowledge to perform a wide range of natural language processing tasks without the need for extensive task-specific training, 
-making it a powerful tool for various applications in language understanding and generation.
-GPT3 uses prelayer normalisation opposed to classic transformers
-
-Note:
-This implementation excludes the modified initialization which accounts for the accumulation on the residual path with model depth. 
-Such an intialisation involves scaling the weights of residual layers at initialization by a factor of 1/√N where N is the number of residual layers. 
-Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10a.html) for the weights and 'zeros' for the biases.
-
-
-example usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import GPT4, GPTDataParallelTrainer
-
-# Generate dummy data
-batch_size = 8
-max_length = 10
-
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length), dtype=jnp.int32)
-
-# Shift to create next-token prediction dataset
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-
-# Create dataset and dataloader
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# How to loop through dataloader
-for batch in dataloader:
-    x, y = batch
-    print(x.shape, y.shape)
-    break
-
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 256,
-    'num_heads': 2,
-    'feedforward_dim': 256,
-    'dropout': 0.1,
-    'vocab_size': 1000,
-    'embed_dim': 256,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-}
-
-# Initialize model
-model = GPT4(**hyperparams)
-rngs = jax.random.PRNGKey(0)
-rngs, dropout_rng = jax.random.split(rngs)
-params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
-
-# Call as you would a Jax/Flax model
-outputs = model.apply({'params': params}, 
-                      dummy_inputs, 
-                      rngs={'dropout': dropout_rng})
-print(outputs.shape)
-
-# Training on data
-trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(train_loader=dataloader, 
-              num_epochs=2, 
-              val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
-start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': jax.random.PRNGKey(2)}, 
-                      method=model.generate)
-print(outputs)
-```
-'''
-
 import jax
 import time
 import flax
@@ -209,13 +117,20 @@ class GEGLU(nn.Module):
 
 class GPT3Block(nn.Module):
     """
-    Transformer Decoder Block.
+    A block of GPT-3 consisting of multi-head self-attention and feedforward neural network layers.
 
-    Args:
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    This class implements a transformer block used in GPT-3, which includes two self-attention layers followed by a position-wise feedforward network. Layer normalization and dropout are applied for regularization and to prevent overfitting.
+
+    Attributes:
+        hidden_dim (int): Dimension of the hidden layer.
+        num_heads (int): Number of attention heads in the multi-head attention mechanism.
+        feedforward_dim (int): Dimension of the feedforward layer.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the components of the GPT-3 block, including attention mechanisms, feedforward network, and normalization layers.
+        causal_mask(batch_size, destination_dim, source_dim): Creates a causal mask to ensure that predictions for a position can depend only on known outputs at earlier positions.
+        __call__(x, mask=None, training=False): Defines the computation performed at every call of the GPT-3 block.
     """
     hidden_dim: int
     num_heads: int
@@ -237,18 +152,7 @@ class GPT3Block(nn.Module):
                 batch_size: int, 
                 destination_dim: int, 
                 source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for self-attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
-        # Create index tensors for the source and destination dimensions
+        
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
         mask = idx_source >= idx_destination - source_dim + destination_dim
@@ -262,17 +166,7 @@ class GPT3Block(nn.Module):
                 x: jnp.ndarray, 
                 mask: jnp.ndarray = None, 
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+       
         mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
 
         x = self.norm1(x)
@@ -295,14 +189,22 @@ class GPT3Block(nn.Module):
 
 class GPT3Decoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the GPT-3 model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The decoder consists of multiple layers of GPT-3 blocks that process sequences of tokens to generate predictions. It includes an embedding layer to map tokens to high-dimensional vectors and an output layer to map the representations to logits over the vocabulary.
+
+    Attributes:
+        num_layers (int): The number of GPT-3 blocks in the decoder.
+        hidden_dim (int): The dimensionality of the input and output features for the blocks.
+        num_heads (int): The number of attention heads in each GPT-3 block.
+        feedforward_dim (int): The dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): The dropout rate used in the decoder for regularization.
+        vocab_size (int): The size of the vocabulary.
+        embed_dim (int): The dimensionality of the token embeddings.
+
+    Methods:
+        setup(): Initializes the components of the GPT-3 decoder including the embedding layer, GPT-3 blocks, and the output layer.
+        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the GPT-3 decoder, generating predictions for the next token in the sequence.
     """
     num_layers: int
     hidden_dim: int
@@ -329,18 +231,7 @@ class GPT3Decoder(nn.Module):
                  mask: jnp.ndarray = None, 
                  training: bool = False,
                  drop_last_layer: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -356,7 +247,119 @@ class GPT3Decoder(nn.Module):
     
 
 class GPT3(nn.Module):
+    """
+    Implements the GPT-3 model for autoregressive language modeling.
 
+    GPT-3 is a transformer-based model designed to generate text by predicting the next token in a sequence given the previous tokens. It can be used for a wide range of natural language processing tasks including text generation, completion, and more.
+
+    Attributes:
+        num_layers (int): The number of layers (blocks) in the GPT-3 model.
+        hidden_dim (int): The dimensionality of the input and output features for the blocks.
+        num_heads (int): The number of attention heads in each block.
+        feedforward_dim (int): The dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): The dropout rate used in the model for regularization.
+        vocab_size (int): The size of the vocabulary.
+        embed_dim (int): The dimensionality of the token embeddings.
+        max_length (int): The maximum length of the generated sequences.
+        start_token (int): The token used to start the generation process.
+        end_token (int): The token that indicates the end of a generated sequence.
+
+    Methods:
+        setup(): Initializes the GPT-3 model including the decoder component.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the GPT-3 model, generating predictions for the next token in the sequence.
+        generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively, starting from an optional initial sequence.
+        generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
+
+    The motivation behind GPT is to create a highly effective language model that can understand and generate human-like text. 
+    Its architecture is a decoder-only transformer trained on next-token prediction and generates autoregressively duting training.
+    It's pre-trained on a massive amount of text data, which allows it to learn the patterns and nuances of language. 
+    GPT's strength lies in its ability to generalize this knowledge to perform a wide range of natural language processing tasks without the need for extensive task-specific training, 
+    making it a powerful tool for various applications in language understanding and generation.
+    GPT3 uses prelayer normalisation opposed to classic transformers
+
+    Note:
+    This implementation excludes the modified initialization which accounts for the accumulation on the residual path with model depth. 
+    Such an intialisation involves scaling the weights of residual layers at initialization by a factor of 1/√N where N is the number of residual layers. 
+    Rather we use 'Xavier' initialization (https://proceedings.mlr.press/v9/glorot10a.html) for the weights and 'zeros' for the biases.
+
+
+    example usage:
+        ```py
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import GPT3, GPTDataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = GPT3(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
+    """
     num_layers: int
     hidden_dim: int
     num_heads: int
@@ -368,25 +371,7 @@ class GPT3(nn.Module):
     start_token: int
     end_token: int
 
-    """
-    Decoder-only model from OpenAI's GPT-3 paper: https://arxiv.org/abs/2005.14165
-
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
-        vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
-    """
-
     def setup(self):
-        """
-        Initialize the T5 model by setting up the encoder and decoder.
-        """
         self.decoder = GPT3Decoder(self.num_layers,
                                 self.embed_dim,
                                 self.num_heads,
@@ -401,11 +386,7 @@ class GPT3(nn.Module):
                  training: bool = True,
                  drop_last_layer: bool = False) -> jnp.ndarray:
         
-        """ 
-        Causal models are trained differently, the outputs are just the inputs shifted by 1
-        While the generation is autoregressve, hence a different function for that
-        """
-        return self.decoder(x=x, 
+       return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
 
@@ -414,25 +395,13 @@ class GPT3(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
             
         decoder_input = x if x is not None else jnp.array([[self.start_token]])
         output_sequence = []
 
-        # Autoregressive decoding loop
         for _ in range(self.max_length):
             decoder_output = self.decoder(decoder_input, training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
@@ -458,18 +427,7 @@ class GPT3(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
-
+        
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
@@ -548,11 +506,7 @@ class SparseMixtureOfExperts(nn.Module):
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
         gating_weights = nn.softmax(self.gate(X), axis=-1)
-
-        # Get top K experts for each example in the batch
         top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k:]
-
-        # Get expert outputs
         expert_outputs = jnp.stack([expert(X) for expert in self.experts], axis=2)
 
         # Select only the top K expert outputs
@@ -563,22 +517,28 @@ class SparseMixtureOfExperts(nn.Module):
 
         # Compute the gating weights for the selected top K experts
         top_k_gating_weights = jnp.take_along_axis(gating_weights, top_k_indices, axis=-1)
-
-        # Compute the mixed expert output
         mixed_expert_output = jnp.sum(top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2)
-
         return self.dense_final(mixed_expert_output)
     
 
 class GPT4Block(nn.Module):
     """
-    Transformer Decoder Block.
+    Implements a transformer block for GPT-4 with self-attention, feed-forward layers, and a sparse mixture of experts.
 
-    Args:
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    This block extends the GPT-3 architecture by incorporating a sparse mixture of experts (MoE) for the feed-forward layer, enabling the model to route information through a subset of expert networks based on the input context, potentially increasing model capacity and efficiency.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads in the multi-head self-attention mechanism.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
+        dropout (float): Dropout rate for regularization.
+        num_experts (int): Number of experts in the sparse mixture of experts layer.
+        top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer.
+
+    Methods:
+        setup(): Initializes the components of the GPT-4 block.
+        causal_mask(batch_size, destination_dim, source_dim): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism.
+        __call__(x, mask, training): Processes the input tensor through the GPT-4 block.
     """
     hidden_dim: int
     num_heads: int
@@ -605,17 +565,7 @@ class GPT4Block(nn.Module):
                 batch_size: int, 
                 destination_dim: int, 
                 source_dim: int) -> jnp.ndarray:
-        """
-        Generate a causal mask for self-attention.
-
-        Args:
-            batch_size (int): Batch size.
-            destination_dim (int): Dimension of the destination sequence.
-            source_dim (int): Dimension of the source sequence.
-
-        Returns:
-            jnp.ndarray: Causal mask with shape (batch_size, num_heads, destination_dim, source_dim).
-        """
+        
         # Create index tensors for the source and destination dimensions
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
@@ -630,17 +580,7 @@ class GPT4Block(nn.Module):
                 x: jnp.ndarray,
                 mask: jnp.ndarray = None, 
                 training: bool = False) -> tuple:
-        """
-        Apply the DecoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, attention tensor, and cross-attention tensor.
-        """
+        
         mask = self.causal_mask(x.shape[0], x.shape[1], x.shape[1])
 
         x = self.norm1(x)
@@ -663,14 +603,24 @@ class GPT4Block(nn.Module):
 
 class GPT4Decoder(nn.Module):
     """
-    Transformer Decoder.
+    Implements the decoder component of the GPT-4 model.
 
-    Args:
-        num_layers (int): Number of decoder layers.
-        hidden_dim (int): Input dimension.
-        num_heads (int): Number of attention heads.
-        feedforward_dim (int): Dimension of the feed-forward network.
-        dropout (float): Dropout rate.
+    The decoder is composed of multiple GPT-4 blocks, processing sequences of tokens to generate text. It includes an embedding layer to convert tokens into vectors and an output layer to predict the next token in the sequence.
+
+    Attributes:
+        num_layers (int): Number of GPT-4 blocks in the decoder.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each GPT-4 block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimensionality of the token embeddings.
+        num_experts (int): Number of experts in the sparse mixture of experts layer in each GPT-4 block.
+        top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer in each GPT-4 block.
+
+    Methods:
+        setup(): Initializes the components of the GPT-4 decoder.
+        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the GPT-4 decoder.
     """
     num_layers: int
     hidden_dim: int
@@ -701,18 +651,7 @@ class GPT4Decoder(nn.Module):
                  mask: jnp.ndarray = None, 
                  training: bool = False,
                  drop_last_layer: bool = False) -> tuple:
-        """
-        Apply the TransformerDecoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor, list of attention tensors, and list of cross-attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -729,19 +668,106 @@ class GPT4Decoder(nn.Module):
 
 class GPT4(nn.Module):
     """
-    This is implemented from rumours about the implementation details of GPT-4, and as such is not expected to be spot on.
+    Implements the GPT-4 model for autoregressive language modeling with a sparse mixture of experts.
 
-    Args:
-        num_layers (int): Number of layers in the encoder and decoder.
-        hidden_dim (int): Dimensionality of input embeddings.
-        num_heads (int): Number of attention heads in the multi-head attention layers.
-        feedforward_dim (int): Dimensionality of the feedforward layers.
-        dropout (float): Dropout probability.
+    GPT-4 builds upon the GPT-3 architecture by introducing a sparse mixture of experts in the feed-forward layers, aiming to enhance model capacity and efficiency. It is designed for tasks such as text generation, completion, and more.
+
+    Attributes:
+        num_layers (int): Number of layers (blocks) in the GPT-4 model.
+        hidden_dim (int): Dimensionality of the input and output features for the blocks.
+        num_heads (int): Number of attention heads in each block.
+        feedforward_dim (int): Dimensionality of the inner layer of the feed-forward networks in the blocks.
+        dropout (float): Dropout rate used for regularization.
         vocab_size (int): Size of the vocabulary.
-        embed_dim (int): Dimensionality of token embeddings.
-        max_length (int): Maximum length of generated sequences.
-        start_token (int): Token ID for the start of sequence.
-        end_token (int): Token ID for the end of sequence.
+        embed_dim (int): Dimensionality of the token embeddings.
+        max_length (int): Maximum length of the generated sequences.
+        start_token (int): Token used to start the generation process.
+        end_token (int): Token that indicates the end of a generated sequence.
+        num_experts (int): Number of experts in the sparse mixture of experts layer.
+        top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer.
+
+    Methods:
+        setup(): Initializes the GPT-4 model including the decoder component.
+        __call__(x, training, drop_last_layer): Processes the input tensor through the GPT-4 model.
+        generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
+        generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
+
+    example usage:
+        ```py
+        import jax
+        import jax.numpy as jnp
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import GPT4, GPTDataParallelTrainer
+
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
+
+        # Replace with actual tokenised data
+        data = jnp.ones((101, max_length), dtype=jnp.int32)
+
+        # Shift to create next-token prediction dataset
+        dummy_inputs = data[:, :-1]
+        dummy_targets = data[:, 1:]
+
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_inputs, dummy_targets)
+        dataloader = DataLoader(dataset, 
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                drop_last=False)
+
+        # How to loop through dataloader
+        for batch in dataloader:
+            x, y = batch
+            print(x.shape, y.shape)
+            break
+
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+        }
+
+        # Initialize model
+        model = GPT4(**hyperparams)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
+
+        # Call as you would a Jax/Flax model
+        outputs = model.apply({'params': params}, 
+                            dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        print(outputs.shape)
+
+        # Training on data
+        trainer = GPTDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
+        trainer.train(train_loader=dataloader, 
+                    num_epochs=2, 
+                    val_loader=dataloader)
+
+        print(trainer.evaluate(dataloader))
+
+        # Generating from a start token
+        start_tokens = jnp.array([[123, 456]])
+
+        # Remember to load the trained parameters 
+        params = trainer.load_params('params.pkl')
+        outputs = model.apply({'params': params},
+                            start_tokens,
+                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            method=model.generate)
+        print(outputs)
+        ```
     """
     num_layers: int
     hidden_dim: int
@@ -773,10 +799,6 @@ class GPT4(nn.Module):
                  training: bool = False,
                  drop_last_layer: bool = False) -> jnp.ndarray:
         
-        """ 
-        Causal models are trained differently, the outputs are just the inputs shifted by 1
-        While the generation is autoregressve, hence a different function for that
-        """
         return self.decoder(x=x, 
                             training=training,
                             drop_last_layer=drop_last_layer)[0]
@@ -786,18 +808,7 @@ class GPT4(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        """
-        Generate sequences either from scratch or continues from the input sequence.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Input sequence.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            seed (int, optional): Random seed for reproducibility.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            Tuple[jax.numpy.ndarray]: A tuple containing the generated sequence.
-        """
+        
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
             
@@ -830,18 +841,7 @@ class GPT4(nn.Module):
                  x: Optional[jnp.ndarray] = None,
                  temperature: float = 1.0,
                  deterministic: bool = False) -> jnp.ndarray:
-        """
-        Generate sequences either from scratch or continues from the input sequence in batch.
-
-        Args:
-            x (jax.numpy.ndarray, optional): Batch of input sequences.
-            temperature (float, optional): Temperature for token sampling. Higher values result in more randomness.
-            deterministic (bool, optional): If True, selects the most probable next word without random sampling.
-
-        Returns:
-            jax.numpy.ndarray: An array containing the generated sequences for each sample in the batch.
-        """
-
+        
         batch_size = x.shape[0] if x is not None else 1
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)

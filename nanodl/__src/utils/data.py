@@ -13,6 +13,7 @@ class Dataset:
     method to return a data item at a given index.
 
     Example usage:
+    ```
         >>> class MyDataset(Dataset):
         ...     def __init__(self, data):
         ...         self.data = data
@@ -23,6 +24,7 @@ class Dataset:
         >>> dataset = MyDataset(jnp.arange(10))
         >>> print(len(dataset))
         >>> print(dataset[5])
+    ```
     """
 
     def __len__(self):
@@ -44,9 +46,11 @@ class ArrayDataset(Dataset):
         *arrays (jnp.array): Variable number of JAX numpy arrays to include in the dataset.
 
     Example usage:
+    ```
         >>> dataset = ArrayDataset(jnp.array([1, 2, 3]), jnp.array([4, 5, 6]))
         >>> print(len(dataset))
         >>> print(dataset[1])
+    ```
     """
 
     def __init__(self, *arrays: jnp.array):
@@ -77,10 +81,12 @@ class DataLoader:
                                     Default is False.
 
     Example usage:
+    ```
         >>> dataset = ArrayDataset(jnp.ones((1001, 256, 256)), jnp.ones((1001, 256, 256)))
         >>> dataloader = DataLoader(dataset, batch_size=10, shuffle=True, drop_last=False)
         >>> for batch in dataloader:
         ...     print(batch.shape)
+    ```
     """
 
     def __init__(self, dataset: Dataset, batch_size: int = 1, shuffle: bool = False, drop_last: bool = False, **kwargs):
@@ -131,16 +137,6 @@ class DataLoader:
 
 @dataclass
 class Config:
-    """
-    Global configuration for the library.
-
-    This dataclass holds global configuration settings, such as the random seed.
-
-    Fields:
-        rng_reserve_size (int): Number of additional PRNG keys to reserve.
-        global_seed (int): Global seed for random number generation.
-    """
-
     rng_reserve_size: int
     global_seed: int
 
@@ -159,8 +155,10 @@ class PRNGSequence(Iterator[jax.random.PRNGKey]):
         seed (int): Seed for generating the initial PRNG key.
 
     Example usage:
+    ```
         >>> prng_seq = PRNGSequence(42)
         >>> key = next(prng_seq)
+    ```
     """
 
     def __init__(self, seed: int):
@@ -168,12 +166,6 @@ class PRNGSequence(Iterator[jax.random.PRNGKey]):
         self._subkeys = collections.deque()
 
     def reserve(self, num):
-        """
-        Splits additional ``num`` keys for later use.
-
-        Args:
-            num (int): Number of keys to reserve.
-        """
         if num > 0:
             new_keys = tuple(jax.random.split(self._key, num + 1))
             self._key = new_keys[0]

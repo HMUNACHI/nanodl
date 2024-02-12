@@ -37,27 +37,14 @@ class PCA:
 
     def __init__(self,
                  n_components: int):
-        """
-        Initialize the PCA class.
-
-        Args:
-            n_components (int): Number of principal components to retain.
-        """
+        
         self.n_components = n_components
         self.components = None
         self.mean = None
 
     def fit(self, 
             X: jnp.ndarray) -> None:
-        """
-        Fit the PCA model on the input data.
-
-        Args:
-            X (ndarray): Input data with shape (num_samples, num_features).
-
-        Returns:
-            None
-        """
+        
         self.mean = jnp.mean(X, axis=0)
         X_centered = X - self.mean
         cov_matrix = jnp.cov(X_centered, rowvar=False)
@@ -68,44 +55,17 @@ class PCA:
 
     def transform(self, 
                   X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Transform the input data into the PCA space.
-
-        Args:
-            X (ndarray): Input data with shape (num_samples, num_features).
-
-        Returns:
-            ndarray: Transformed data with shape (num_samples, n_components).
-        """
         X_centered = X - self.mean
         return jnp.dot(X_centered, self.components)
 
     def inverse_transform(self, 
                           X_transformed: jnp.ndarray) -> jnp.ndarray:
-        """
-        Inverse transform PCA-transformed data back to the original space.
-
-        Args:
-            X_transformed (ndarray): Transformed data with shape (num_samples, n_components).
-
-        Returns:
-            ndarray: Inverse transformed data with shape (num_samples, num_features).
-        """
         return jnp.dot(X_transformed, self.components.T) + self.mean
 
     def sample(self, 
                n_samples:int=1, 
                key: Optional[jnp.ndarray] = None) -> jnp.ndarray:
-        """
-        Generate synthetic data samples from the learned PCA distribution.
-
-        Args:
-            n_samples (int, optional): Number of samples to generate.
-            key (ndarray, optional): Random key for generating samples.
-
-        Returns:
-            ndarray: Generated samples with shape (n_samples, num_features).
-        """
+        
         if key is None:
             key = jax.random.PRNGKey(0)
 

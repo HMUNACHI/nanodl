@@ -15,12 +15,14 @@ class KMeans:
         clusters (Optional[jnp.ndarray]): Cluster assignments of the data points.
 
     Example usage:
+    ```
         kmeans = KMeans(k=4)
         X, _ = make_blobs(n_samples=300, centers=4, n_features=2, random_state=0)
         kmeans.fit(X)
         clusters = kmeans.predict(X)
         print("Centroids:", kmeans.centroids)
         print("Cluster assignments:", clusters)
+    ```
     """
 
     def __init__(self, 
@@ -35,57 +37,29 @@ class KMeans:
 
     def initialize_centroids(self, 
                              X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Initialize centroids by randomly selecting data points.
-
-        Args:
-            X (jnp.ndarray): Input data points.
-
-        Returns:
-            jnp.ndarray: Initialized centroids.
-        """
+        
         indices = jnp.arange(X.shape[0])
-        selected = jax.random.choice(jax.random.PRNGKey(self.random_seed), indices, shape=(self.k,), replace=False)
+        selected = jax.random.choice(jax.random.PRNGKey(self.random_seed), 
+                                     indices, 
+                                     shape=(self.k,), 
+                                     replace=False)
         return X[selected]
 
     def assign_clusters(self, 
                         X: jnp.ndarray, 
                         centroids: jnp.ndarray) -> jnp.ndarray:
-        """
-        Assign data points to the nearest centroid.
-
-        Args:
-            X (jnp.ndarray): Input data points.
-            centroids (jnp.ndarray): Current centroids.
-
-        Returns:
-            jnp.ndarray: Cluster assignments for each data point.
-        """
+        
         distances = jnp.sqrt(((X[:, jnp.newaxis, :] - centroids[jnp.newaxis, :, :]) ** 2).sum(axis=2))
         return jnp.argmin(distances, axis=1)
 
     def update_centroids(self, X: jnp.ndarray, 
                          clusters: jnp.ndarray) -> jnp.ndarray:
-        """
-        Update centroids as the mean of data points in each cluster.
-
-        Args:
-            X (jnp.ndarray): Input data points.
-            clusters (jnp.ndarray): Current cluster assignments.
-
-        Returns:
-            jnp.ndarray: Updated centroids.
-        """
+        
         return jnp.array([X[clusters == i].mean(axis=0) for i in range(self.k)])
 
     def fit(self, 
             X: jnp.ndarray) -> None:
-        """
-        Fit the KMeans model to the data.
-
-        Args:
-            X (jnp.ndarray): Input data points.
-        """
+        
         self.centroids = self.initialize_centroids(X)
         for _ in range(self.num_iters):
             self.clusters = self.assign_clusters(X, self.centroids)
@@ -96,18 +70,6 @@ class KMeans:
 
     def predict(self, 
                 X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Predict cluster assignments for new data points.
-
-        Args:
-            X (jnp.ndarray): New data points.
-
-        Returns:
-            jnp.ndarray: Cluster assignments for each data point.
-
-        Raises:
-            ValueError: If the model is not yet trained.
-        """
         if self.centroids is None:
             raise ValueError("Model not yet trained. Call 'fit' with training data.")
         return self.assign_clusters(X, self.centroids)
@@ -130,6 +92,7 @@ class GaussianMixtureModel:
         seed (int): Random seed for initialization.
 
     Example:
+    ```
         >>> import jax.numpy as jnp
         >>> from gaussian_mixture_model_jax import GaussianMixtureModelJAX
         >>> X = jnp.array([[1, 2], [1, 4], [1, 0],
@@ -139,6 +102,7 @@ class GaussianMixtureModel:
         >>> print(gmm.means)
         >>> labels = gmm.predict(X)
         >>> print(labels)
+    ```
     """
 
     def __init__(self, 
