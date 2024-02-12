@@ -71,44 +71,27 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 class PatchEmbedding(nn.Module):
     """
-    A Flax module for patch embedding in a vision transformer.
+    Implements patch embedding for vision transformers.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
+    This module extracts patches from input images, flattens them, and projects them to a specified embedding dimension. Optionally, learned position embeddings can be added to the patch embeddings.
 
     Attributes:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
-    """
+        patch_size (tuple): Size (height, width) of the patches to extract from input images.
+        embed_dim (int): Dimension of the embeddings for the patches.
 
+    Methods:
+        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
+        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
+    """
     patch_size: Tuple[int, int]
     embed_dim: int 
 
     @nn.compact
     def __call__(self, x):
-        """
-        Apply the PatchEmbedding module to input data.
-
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Embedded patches with shape (batch_size, num_patches, embed_dim).
-        """
         x = nn.Dense(self.embed_dim)(self.extract_patches(x))
         return x + nn.Embed(num_embeddings=x.shape[1], features=x.shape[2])(jnp.arange(x.shape[1]))
 
     def extract_patches(self, images: jnp.ndarray) -> jnp.ndarray:
-        """
-        Split multiple images into patches of a specified size and flatten each patch.
-
-        Args:
-        images (jax.numpy.ndarray): Input images as a JAX array with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Flattened array containing image patches for all input images.
-        """
         if len(images.shape) != 4:
             raise ValueError("Input images should have shape (batch_size, H, W, C)")
         
@@ -138,15 +121,6 @@ class MixerBlock(nn.Module):
     """
     @nn.compact
     def __call__(self, x):
-        """
-        Applies the MixerBlock to an input tensor.
-
-        Args:
-            x (jax.numpy.ndarray): Input tensor of shape (batch_size, sequence_length, dim).
-
-        Returns:
-            jax.numpy.ndarray: Output tensor of the same shape as the input.
-        """
         # Create a skip connection
         skip = x.copy()
         x = nn.LayerNorm()(x)
@@ -160,20 +134,22 @@ class MixerBlock(nn.Module):
 
 class MixerEncoder(nn.Module):
     """
-    MLPMixer model for image encoding.
+    Implements an MLP Mixer encoder for image processing.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    num_layers (int): Number of transformer encoder layers.
-    hidden_dim(int): Input dimension for the transformer encoder.
-    num_heads (int): Number of attention heads in the transformer encoder.
-    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
-    dropout (float): Dropout probability for regularization.
+    This module applies patch embedding to input images and then processes the resulting sequence of embedded patches through multiple transformer encoder blocks.
 
-    Note: The transformer MLP blocks were designed to have a bottleneck
-          As such, the embeddining dim and feedforward dim should be the same to 
+    Attributes:
+        patch_size (tuple): Size of the patches (height, width) to be extracted from input images.
+        num_layers (int): Number of transformer encoder blocks.
+        hidden_dim (int): Dimensionality of the input and output features for the transformer encoder.
+        num_heads (int): Number of attention heads in the transformer encoder.
+        feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the patch embedding and encoder blocks.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
-
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -182,10 +158,6 @@ class MixerEncoder(nn.Module):
     dropout: float
 
     def setup(self):
-        """
-        Setup the Mixer model architecture by initializing its components.
-        Initializes the embedding layer, transformer encoder blocks, and the output layer.
-        """
         self.embedding = PatchEmbedding(self.patch_size, 
                                         self.feedforward_dim)
         
@@ -197,14 +169,7 @@ class MixerEncoder(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray,
                  training: bool = False) -> tuple:
-        """
-        Apply the Mixer model to input data.
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-        Returns:
-        jax.numpy.ndarray: Predicted class scores for each input sample.
-        jax.numpy.ndarray: Attention maps from the transformer encoder.
-        """
+        
         x = self.embedding(x)
         for layer in self.layers:
             x = layer(x)
@@ -276,15 +241,25 @@ class Mixer(nn.Module):
 
 class MixerDataParallelTrainer:
     """
-    A class for training a GPT model using data parallelism.
+    Trainer class using data parallelism with JAX.
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
-        model: The GPT model to be trained.
-        num_parameters: The number of parameters in the model.
-        best_val_loss: The best validation loss achieved during training.
-        weights_filename: Filename for saving the model weights.
-        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
-        state: The current state of the model, including parameters and optimizer state.
+        model (Any): The model to be trained.
+        input_shape (Tuple[int, ...]): The shape of the image input tensor.
+        weights_filename (str): Filename where the trained model weights will be saved.
+        learning_rate (float): Learning rate for the optimizer.
+        params_path (Optional[str]): Path to pre-trained model parameters for initializing the model, if available.
+
+    Methods:
+        create_train_state(learning_rate, text_input_shape, image_input_shape): Initializes the training state, including parameters and optimizer.
+        train_step(state, texts, images): Performs a single training step, including forward pass, loss computation, and gradients update.
+        train(train_loader, num_epochs, val_loader): Runs the training loop over the specified number of epochs, using the provided data loaders for training and validation.
+        evaluation_step(state, texts, images): Performs an evaluation step, computing forward pass and loss without updating model parameters.
+        evaluate(test_loader): Evaluates the model performance on a test dataset.
+        save_params(): Saves the model parameters to a file.
+        load_params(filename): Loads model parameters from a file.
     """
     def __init__(self, 
                  model: Any, 
@@ -308,17 +283,7 @@ class MixerDataParallelTrainer:
     def create_train_state(self, 
                            learning_rate: float, 
                            input_shape: Tuple[int, ...]) -> Any:
-        """
-        Creates and initializes the training state for the model.
-
-        Args:
-            learning_rate: The learning rate for the optimizer.
-            text_input_shape: The shape of the text input.
-            image_input_shape: The shape of the image input.
-
-        Returns:
-            The initialized training state.
-        """
+        
         rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
         params = self.model.init(rngs, jnp.ones(input_shape))['params']
 
@@ -336,16 +301,7 @@ class MixerDataParallelTrainer:
     def train_step(state: Any, 
                    inputs: jnp.ndarray,
                    targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         def loss_fn(params):
             logits = state.apply_fn({'params': params}, 
                                     inputs, 
@@ -361,14 +317,7 @@ class MixerDataParallelTrainer:
               train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
               num_epochs: int, 
               val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        """
-        Trains the model for a specified number of epochs.
-
-        Args:
-            train_loader: An iterable of training data batches.
-            num_epochs: The number of epochs to train for.
-            val_loader: An optional iterable of validation data batches.
-        """
+        
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -399,29 +348,13 @@ class MixerDataParallelTrainer:
     def evaluation_step(state: Any, 
                         inputs: jnp.ndarray,
                         targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})[0]
         return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
 
     def evaluate(self, 
                  test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        """
-        evaluates the model using the provided validation loader.
-
-        Args:
-            val_loader: An iterable of validation data batches.
-            epoch: The current epoch number.
-            num_epochs: The total number of epochs.
-        """
+        
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
@@ -437,17 +370,11 @@ class MixerDataParallelTrainer:
         return mean_loss
 
     def save_params(self) -> None:
-        """
-        Saves the unreplicated model parameters to a file.
-        """
         self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        """
-        Loads the model parameters from a file
-        """
         with open(filename, 'rb') as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

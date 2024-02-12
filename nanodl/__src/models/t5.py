@@ -185,11 +185,17 @@ class RelativeMultiHeadAttention(nn.Module):
 
 class PositionWiseFFN(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Implements the position-wise feed-forward network of a transformer model.
 
-    Args:
-        num_hiddens (int): Number of hidden units in the feed-forward layers.
-        num_outputs (int): Number of output units in the feed-forward layers.
+    This module applies two linear transformations with a GeLU activation in between, as per the original transformer model design. It is applied to each position separately and identically.
+
+    Attributes:
+        num_hiddens (int): The number of hidden units in the first linear layer.
+        num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
+
+    Methods:
+        setup(): Initializes the two linear layers.
+        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
     num_hiddens: int
     num_outputs: int
@@ -200,24 +206,20 @@ class PositionWiseFFN(nn.Module):
         self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFN to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the feed-forward network.
-        """
         return self.dense2(self.activation(self.dense1(X)))
     
 
 class AddNorm(nn.Module):
     """
-    Residual connection followed by layer normalization.
+    Implements a residual connection followed by layer normalization.
 
-    Args:
+    This module is a common building block in transformer models, promoting easier optimization and enabling deeper networks.
+
+    Attributes:
         dropout (float): Dropout rate for the residual connection.
+
+    Methods:
+        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
     dropout: int
 
@@ -226,30 +228,26 @@ class AddNorm(nn.Module):
                  X: jnp.ndarray, 
                  Y: jnp.ndarray, 
                  training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
+        
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
     
 
 class T5EncoderBlock(nn.Module):
     """
-    Transformer Encoder Block.
+    Represents a single block in the transformer encoder.
 
-    Args:
-        hidden_dim (int): Input dimension.
+    Each encoder block consists of a multi-head self-attention layer and a position-wise feed-forward network. Both sublayers have residual connections and are followed by layer normalization.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+
+    Methods:
+        setup(): Initializes the attention, feed-forward network, and normalization layers.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -267,17 +265,7 @@ class T5EncoderBlock(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
+        
         attended_x, attention = self.attention(x, x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         linear_output = self.linear(x)
@@ -287,14 +275,24 @@ class T5EncoderBlock(nn.Module):
     
 class T5Encoder(nn.Module):
     """
-    Transformer Encoder.
+    Implements a transformer encoder for text.
 
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim (int): Input dimension.
+    This module combines an embedding layer (with optional learned positional encodings) with multiple encoder blocks to process sequences of text.
+
+    Attributes:
+        num_layers (int): Number of encoder blocks in the transformer.
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+        max_len (int): Maximum length of the input sequences.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimension of the embeddings.
+        learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
+
+    Methods:
+        setup(): Initializes the embedding layer and the encoder blocks.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the transformer encoder.
     """
     num_layers: int
     hidden_dim: int
@@ -319,18 +317,7 @@ class T5Encoder(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the TransformerEncoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and list of attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -627,15 +614,26 @@ class T5(nn.Module):
 
 class T5DataParallelTrainer:
     """
-    A class for training a GPT model using data parallelism.
+    Trainer class using data parallelism with JAX.
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
-        model: The GPT model to be trained.
-        num_parameters: The number of parameters in the model.
-        best_val_loss: The best validation loss achieved during training.
-        weights_filename: Filename for saving the model weights.
-        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
-        state: The current state of the model, including parameters and optimizer state.
+        model (Any): The model to be trained.
+        input_shape (Tuple[int, ...]): The shape of the input tensor.
+        tarhet_shape (Tuple[int, ...]): The shape of the image target tensor.
+        weights_filename (str): Filename where the trained model weights will be saved.
+        learning_rate (float): Learning rate for the optimizer.
+        params_path (Optional[str]): Path to pre-trained model parameters for initializing the model, if available.
+
+    Methods:
+        create_train_state(learning_rate, text_input_shape, image_input_shape): Initializes the training state, including parameters and optimizer.
+        train_step(state, texts, images): Performs a single training step, including forward pass, loss computation, and gradients update.
+        train(train_loader, num_epochs, val_loader): Runs the training loop over the specified number of epochs, using the provided data loaders for training and validation.
+        evaluation_step(state, texts, images): Performs an evaluation step, computing forward pass and loss without updating model parameters.
+        evaluate(test_loader): Evaluates the model performance on a test dataset.
+        save_params(): Saves the model parameters to a file.
+        load_params(filename): Loads model parameters from a file.
     """
     def __init__(self, 
                  model: Any, 
@@ -661,17 +659,7 @@ class T5DataParallelTrainer:
                            learning_rate: float, 
                            input_shape: Tuple[int, ...],
                            target_shape: Tuple[int, ...]) -> Any:
-        """
-        Creates and initializes the training state for the model.
-
-        Args:
-            learning_rate: The learning rate for the optimizer.
-            text_input_shape: The shape of the text input.
-            image_input_shape: The shape of the image input.
-
-        Returns:
-            The initialized training state.
-        """
+        
         rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
         params = self.model.init(rngs, 
                                  jnp.ones(input_shape, dtype=jnp.int32), 
@@ -691,16 +679,7 @@ class T5DataParallelTrainer:
     def train_step(state: Any, 
                    inputs: jnp.ndarray,
                    targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         def loss_fn(params):
             logits = state.apply_fn({'params': params}, 
                                     inputs, 
@@ -717,14 +696,7 @@ class T5DataParallelTrainer:
               train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
               num_epochs: int, 
               val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        """
-        Trains the model for a specified number of epochs.
-
-        Args:
-            train_loader: An iterable of training data batches.
-            num_epochs: The number of epochs to train for.
-            val_loader: An optional iterable of validation data batches.
-        """
+        
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -755,29 +727,13 @@ class T5DataParallelTrainer:
     def evaluation_step(state: Any, 
                         inputs: jnp.ndarray,
                         targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         logits = state.apply_fn({'params': state.params}, inputs, targets,  rngs={'dropout': jax.random.PRNGKey(2)})
         return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
 
     def evaluate(self, 
                  test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        """
-        evaluates the model using the provided validation loader.
-
-        Args:
-            val_loader: An iterable of validation data batches.
-            epoch: The current epoch number.
-            num_epochs: The total number of epochs.
-        """
+        
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
@@ -793,17 +749,11 @@ class T5DataParallelTrainer:
         return mean_loss
 
     def save_params(self) -> None:
-        """
-        Saves the unreplicated model parameters to a file.
-        """
         self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        """
-        Loads the model parameters from a file
-        """
         with open(filename, 'rb') as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

@@ -1,78 +1,3 @@
-'''
-CLIP (Contrastive Language-Image Pretraining) is designed to understand and connect vision and language. 
-Its motivation arises from the need to bridge the gap between textual and visual information processing in AI. 
-CLIP's architecture is based on a vision-language transformer, 
-which is pretrained on a large corpus of text and images from the internet, 
-allowing it to learn associations between text and visuals. 
-Unlike traditional models that are pretrained on single-modal data, CLIP can perform a wide range of tasks, 
-including image classification, zero-shot object recognition, and even generating textual descriptions for images. 
-CLIP's versatility and performance stem from its ability to encode and compare text and image representations directly, 
-enabling it to generalize well across various vision and language tasks while minimizing the need for task-specific fine-tuning.
-
-Example Usage:
-```
-import jax
-import jax.numpy as jnp
-from nanodl import ArrayDataset, DataLoader
-from nanodl import CLIP, CLIPDataParallelTrainer
-
-# Dummy data parameters
-batch_size = 8
-max_length = 50 
-vocab_size = 1000  
-embed_dim = 256  
-patch_size = (16, 16)  
-
-# Generate dummy text and image data
-dummy_texts = jnp.ones((batch_size, max_length), dtype=jnp.int32)
-dummy_images = jnp.ones((batch_size, 224, 224, 3))
-dataset = ArrayDataset(dummy_texts, dummy_images)
-dataloader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True, 
-                        drop_last=False)
-
-# CLIP model parameters
-clip_params = {
-    "dropout": 0.1,
-    "num_heads": 2,
-    "feedforward_dim": embed_dim,
-    "num_layers_text": 1,
-    "hidden_dim_text": embed_dim,
-    "image_patch_size": patch_size,
-    "hidden_dim_image": embed_dim,
-    "num_layers_images": 1,
-    "max_len": max_length,
-    "vocab_size": vocab_size,
-    "embed_dim": embed_dim
-}
-
-# Initialize CLIP model
-clip_model = CLIP(**clip_params)
-rng = jax.random.PRNGKey(0)
-params = clip_model.init(rng, dummy_texts, dummy_images)['params']
-loss = clip_model.apply({'params': params}, dummy_texts, dummy_images)
-
-# Training on your data
-trainer = CLIPDataParallelTrainer(clip_model, 
-                                  dummy_texts.shape, 
-                                  dummy_images.shape, 'params.pkl')
-trainer.train(dataloader, 2)
-
-# Sample encodings
-image_encodings = clip_model.apply({'params': params}, 
-                                images = dummy_images,
-                                method=clip_model.encode_image) 
-print(image_encodings.shape)
-
-# Sample embeddings
-image_embeddings = clip_model.apply({'params': params}, 
-                                images = dummy_images,
-                                method=clip_model.embed_image) 
-print(image_embeddings.shape)
-```
-'''
-
 import jax
 import flax
 import time
@@ -86,10 +11,17 @@ from typing import Any, Iterable, Optional, Tuple, Dict
 
 class PositionalEncoding(nn.Module):
     """
-    Positional Encoding.
-    Args:
-        num_embeddings (int): Number of embeddings.
-        features (int): Number of features in the embeddings.
+    Implements the positional encoding layer for adding positional information to embeddings in a transformer model.
+
+    This layer generates a unique positional encoding for each position in the input sequence using a combination of sine and cosine functions. The encoding is added to the embedding vector to provide the model with information about the relative or absolute position of the tokens in the sequence.
+
+    Attributes:
+        num_embeddings (int): The maximum number of positions for which to generate positional encodings.
+        features (int): The dimensionality of the embeddings/positional encodings.
+
+    Methods:
+        setup(): Initializes the positional encoding matrix based on the provided attributes.
+        __call__(x: jnp.ndarray): Adds positional encodings to the input embeddings.
     """
     num_embeddings: int
     features: int
@@ -109,11 +41,19 @@ class PositionalEncoding(nn.Module):
 
 class TokenAndPositionEmbedding(nn.Module):
     """
-    Token and Position Embedding.
-    Args:
-        max_len (int): Maximum sequence length.
-        vocab_size (int): Vocabulary size.
-        embed_dim (int): Embedding dimension.
+    Combines token embeddings with positional encodings for input sequences in a transformer model.
+
+    This module embeds tokens using learned embeddings and adds positional encodings. The positional encodings can either be learned or fixed (sine and cosine functions based) depending on the `learned_position` flag.
+
+    Attributes:
+        max_len (int): Maximum length of the input sequences.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimension of the embeddings.
+        learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
+
+    Methods:
+        setup(): Initializes token and positional embeddings.
+        __call__(x: jnp.ndarray): Applies token embeddings and adds positional information to the input sequence.
     """
     max_len : int
     vocab_size : int
@@ -139,11 +79,21 @@ class TokenAndPositionEmbedding(nn.Module):
 
 class SelfMultiHeadAttention(nn.Module):
     """
-    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
-    This involves transforming the input by weighting features by importance.
+    Implements multi-head self-attention mechanism as described in "Attention is All You Need" by Vaswani et al 2017.
+
+    This module splits the input into multiple heads, applies scaled dot-product attention independently on each head, and then concatenates the results. It allows the model to jointly attend to information from different representation subspaces at different positions.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads.
+
+    Methods:
+        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
+        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
+        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
-    hidden_dim : int  # Output dimension
-    num_heads : int  # Number of parallel heads
+    hidden_dim : int 
+    num_heads : int 
 
     def setup(self):
         # Stack all weight matrices together for efficiency
@@ -159,15 +109,6 @@ class SelfMultiHeadAttention(nn.Module):
     def __call__(self, 
                  inputs: jnp.ndarray, 
                  mask: jnp.ndarray = None) -> tuple:
-
-        """
-        Args:
-            context: optional - context ((batch_size, seq_len, dims))
-            Mask: optional - masks where reqions to ignore are flipped to os
-                  regions to attend to are 1s (batch_size, seq_len, dims)
-        Return: outputs (batch_size, seq_len, seq_len)
-                attention matrixes (batch_size, heads, seq_len, seq_len)
-        """
         projections = self.projection(inputs)
         query, key, value = jnp.array_split(projections, 3, axis=-1)
         context_vectors, attention = self.attention_function(query,key, value, mask=mask)
@@ -198,11 +139,17 @@ class SelfMultiHeadAttention(nn.Module):
 
 class PositionWiseFFN(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Implements the position-wise feed-forward network of a transformer model.
 
-    Args:
-        num_hiddens (int): Number of hidden units in the feed-forward layers.
-        num_outputs (int): Number of output units in the feed-forward layers.
+    This module applies two linear transformations with a ReLU activation in between, as per the original transformer model design. It is applied to each position separately and identically.
+
+    Attributes:
+        num_hiddens (int): The number of hidden units in the first linear layer.
+        num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
+
+    Methods:
+        setup(): Initializes the two linear layers.
+        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
     num_hiddens: int
     num_outputs: int
@@ -212,24 +159,20 @@ class PositionWiseFFN(nn.Module):
         self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFN to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the feed-forward network.
-        """
         return self.dense2(nn.gelu(self.dense1(X)))
 
 
 class AddNorm(nn.Module):
     """
-    Residual connection followed by layer normalization.
+    Implements a residual connection followed by layer normalization.
 
-    Args:
+    This module is a common building block in transformer models, promoting easier optimization and enabling deeper networks.
+
+    Attributes:
         dropout (float): Dropout rate for the residual connection.
+
+    Methods:
+        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
     dropout: int
 
@@ -238,28 +181,25 @@ class AddNorm(nn.Module):
                  X: jnp.ndarray, 
                  Y: jnp.ndarray, 
                  training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
 
 
 class EncoderBlock(nn.Module):
     """
-    Transformer Encoder Block.
+    Represents a single block in the transformer encoder.
 
-    Args:
-        hidden_dim(int): Input dimension.
+    Each encoder block consists of a multi-head self-attention layer and a position-wise feed-forward network. Both sublayers have residual connections and are followed by layer normalization.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+
+    Methods:
+        setup(): Initializes the attention, feed-forward network, and normalization layers.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -277,17 +217,6 @@ class EncoderBlock(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
         attended_x, attention = self.attention(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         ff_output = self.ff(x)
@@ -297,14 +226,24 @@ class EncoderBlock(nn.Module):
 
 class TextEncoder(nn.Module):
     """
-    Transformer Encoder.
+    Implements a transformer encoder for text.
 
-    Args:
-        num_layers (int): Number of encoder layers.
-        hidden_dim(int): Input dimension.
+    This module combines an embedding layer (with optional learned positional encodings) with multiple encoder blocks to process sequences of text.
+
+    Attributes:
+        num_layers (int): Number of encoder blocks in the transformer.
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+        max_len (int): Maximum length of the input sequences.
+        vocab_size (int): Size of the vocabulary.
+        embed_dim (int): Dimension of the embeddings.
+        learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
+
+    Methods:
+        setup(): Initializes the embedding layer and the encoder blocks.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the transformer encoder.
     """
     num_layers: int
     hidden_dim: int
@@ -332,18 +271,6 @@ class TextEncoder(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the TransformerEncoder to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-            
-        Returns:
-            tuple: Output tensor and list of attention tensors.
-            each attention map has dim (num_layers, batch_size, num_heads, seq_length, seq_length)
-        """
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -354,44 +281,27 @@ class TextEncoder(nn.Module):
 
 class PatchEmbedding(nn.Module):
     """
-    A Flax module for patch embedding in a vision transformer.
+    Implements patch embedding for vision transformers.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
+    This module extracts patches from input images, flattens them, and projects them to a specified embedding dimension. Optionally, learned position embeddings can be added to the patch embeddings.
 
     Attributes:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
-    """
+        patch_size (tuple): Size (height, width) of the patches to extract from input images.
+        embed_dim (int): Dimension of the embeddings for the patches.
 
+    Methods:
+        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
+        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
+    """
     patch_size: Tuple[int, int]
     embed_dim: int 
 
     @nn.compact
     def __call__(self, x):
-        """
-        Apply the PatchEmbedding module to input data.
-
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Embedded patches with shape (batch_size, num_patches, embed_dim).
-        """
         x = nn.Dense(self.embed_dim)(self.extract_patches(x))
         return x + nn.Embed(num_embeddings=x.shape[1], features=x.shape[2])(jnp.arange(x.shape[1]))
 
     def extract_patches(self, images: jnp.ndarray) -> jnp.ndarray:
-        """
-        Split multiple images into patches of a specified size and flatten each patch.
-
-        Args:
-        images (jax.numpy.ndarray): Input images as a JAX array with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Flattened array containing image patches for all input images.
-        """
         if len(images.shape) != 4:
             raise ValueError("Input images should have shape (batch_size, H, W, C)")
         
@@ -414,20 +324,22 @@ class PatchEmbedding(nn.Module):
 
 class ImageEncoder(nn.Module):
     """
-    Vision Transformer (ViT) model for image encoding.
+    Implements a vision transformer (ViT) encoder for image processing.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    num_layers (int): Number of transformer encoder layers.
-    hidden_dim(int): Input dimension for the transformer encoder.
-    num_heads (int): Number of attention heads in the transformer encoder.
-    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
-    dropout (float): Dropout probability for regularization.
+    This module applies patch embedding to input images and then processes the resulting sequence of embedded patches through multiple transformer encoder blocks.
 
-    Note: The transformer MLP blocks were designed to have a bottleneck
-          As such, the embeddining dim and feedforward dim should be the same to 
+    Attributes:
+        patch_size (tuple): Size of the patches (height, width) to be extracted from input images.
+        num_layers (int): Number of transformer encoder blocks.
+        hidden_dim (int): Dimensionality of the input and output features for the transformer encoder.
+        num_heads (int): Number of attention heads in the transformer encoder.
+        feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the patch embedding and encoder blocks.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
-
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -436,10 +348,6 @@ class ImageEncoder(nn.Module):
     dropout: float
 
     def setup(self):
-        """
-        Setup the ViT model architecture by initializing its components.
-        Initializes the embedding layer, transformer encoder blocks, and the output layer.
-        """
         self.embedding = PatchEmbedding(self.patch_size, 
                                         self.feedforward_dim)
         
@@ -453,14 +361,6 @@ class ImageEncoder(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the ViT model to input data.
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-        Returns:
-        jax.numpy.ndarray: Predicted class scores for each input sample.
-        jax.numpy.ndarray: Attention maps from the transformer encoder.
-        """
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -471,7 +371,15 @@ class ImageEncoder(nn.Module):
 
 class CLIP(nn.Module):
     """
-    CLIP (Contrastive Language-Image Pretraining) model.
+    CLIP (Contrastive Language-Image Pretraining) is designed to understand and connect vision and language. 
+    Its motivation arises from the need to bridge the gap between textual and visual information processing in AI. 
+    CLIP's architecture is based on a vision-language transformer, 
+    which is pretrained on a large corpus of text and images from the internet, 
+    allowing it to learn associations between text and visuals. 
+    Unlike traditional models that are pretrained on single-modal data, CLIP can perform a wide range of tasks, 
+    including image classification, zero-shot object recognition, and even generating textual descriptions for images. 
+    CLIP's versatility and performance stem from its ability to encode and compare text and image representations directly, 
+    enabling it to generalize well across various vision and language tasks while minimizing the need for task-specific fine-tuning.
 
     Args:
     - embed_dim (int): Dimension of the shared embedding space.
@@ -499,6 +407,69 @@ class CLIP(nn.Module):
         Image input shape: (batch_size, height, width, channels)
         Image shape after patch embedding: (batch_size, sequence_length, embed_dim)
         This image sequence length can be calculated with (height * width) / (patch_height * patch_width)
+
+    Example Usage:
+    ```
+    import jax
+    import jax.numpy as jnp
+    from nanodl import ArrayDataset, DataLoader
+    from nanodl import CLIP, CLIPDataParallelTrainer
+
+    # Dummy data parameters
+    batch_size = 8
+    max_length = 50 
+    vocab_size = 1000  
+    embed_dim = 256  
+    patch_size = (16, 16)  
+
+    # Generate dummy text and image data
+    dummy_texts = jnp.ones((batch_size, max_length), dtype=jnp.int32)
+    dummy_images = jnp.ones((batch_size, 224, 224, 3))
+    dataset = ArrayDataset(dummy_texts, dummy_images)
+    dataloader = DataLoader(dataset, 
+                            batch_size=batch_size, 
+                            shuffle=True, 
+                            drop_last=False)
+
+    # CLIP model parameters
+    clip_params = {
+        "dropout": 0.1,
+        "num_heads": 2,
+        "feedforward_dim": embed_dim,
+        "num_layers_text": 1,
+        "hidden_dim_text": embed_dim,
+        "image_patch_size": patch_size,
+        "hidden_dim_image": embed_dim,
+        "num_layers_images": 1,
+        "max_len": max_length,
+        "vocab_size": vocab_size,
+        "embed_dim": embed_dim
+    }
+
+    # Initialize CLIP model
+    clip_model = CLIP(**clip_params)
+    rng = jax.random.PRNGKey(0)
+    params = clip_model.init(rng, dummy_texts, dummy_images)['params']
+    loss = clip_model.apply({'params': params}, dummy_texts, dummy_images)
+
+    # Training on your data
+    trainer = CLIPDataParallelTrainer(clip_model, 
+                                    dummy_texts.shape, 
+                                    dummy_images.shape, 'params.pkl')
+    trainer.train(dataloader, 2)
+
+    # Sample encodings
+    image_encodings = clip_model.apply({'params': params}, 
+                                    images = dummy_images,
+                                    method=clip_model.encode_image) 
+    print(image_encodings.shape)
+
+    # Sample embeddings
+    image_embeddings = clip_model.apply({'params': params}, 
+                                    images = dummy_images,
+                                    method=clip_model.embed_image) 
+    print(image_embeddings.shape)
+    ```
     """
     dropout: float
     num_heads: int
@@ -542,15 +513,7 @@ class CLIP(nn.Module):
                  texts: jnp.ndarray, 
                  images: jnp.ndarray, 
                  training: bool = False) -> Tuple[jnp.ndarray, jnp.ndarray, float]:
-        """
-        Computes embeddings for text and images.
-        Args:
-            texts: Input text data.
-            images: Input image data.
-            training: Indicates whether the model is in training mode.
-        Returns:
-            Tuple containing text embedding, image embedding, and temperature.
-        """
+        
         text_latents, _ = self.text_encoder(texts, training=training)
         image_latents, _ = self.image_encoder(images, training=training)
         text_embedding = self.text_pooler(jnp.mean(text_latents, axis=1))
@@ -560,14 +523,7 @@ class CLIP(nn.Module):
     def clip_loss(self, 
                   text_embeddings: jnp.ndarray, 
                   image_embeddings: jnp.ndarray) -> float:
-        """
-        Compute the CLIP loss between image and text embeddings.
-        Args:
-            text_embeddings: Text embeddings with shape (batch_size, embedding_size).
-            image_embeddings: Image embeddings with shape (batch_size, embedding_size).
-        Returns:
-            Mean CLIP loss.
-        """
+        
         def l2_normalise(x):
             return x / jnp.linalg.norm(x, axis=-1, keepdims=True)
 
@@ -587,49 +543,24 @@ class CLIP(nn.Module):
     def get_attention_maps(self, 
                            texts: jnp.ndarray, 
                            images: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Returns attention maps for texts and images.
-        Args:
-            texts: Input text data.
-            images: Input image data.
-        Returns:
-            Tuple of attention maps for text and images.
-        """
+        
         _, text_attention = self.text_encoder(texts, training=False)
         _, image_attention = self.image_encoder(images, training=False)
         return text_attention, image_attention
 
     def encode_text(self, 
                     texts: jnp.ndarray) -> jnp.ndarray:
-        """
-        Encodes text input into embeddings.
-        Args:
-            texts: Input text data.
-        Returns:
-            Text embeddings.
-        """
+        
         return self.text_encoder(texts)[0]
 
     def encode_image(self, 
                      images: jnp.ndarray) -> jnp.ndarray:
-        """
-        Encodes image input into embeddings.
-        Args:
-            images: Input image data.
-        Returns:
-            Image embeddings.
-        """
+        
         return self.image_encoder(images)[0]
 
     def embed_text(self, 
                    texts: jnp.ndarray) -> jnp.ndarray:
-        """
-        Applies a pooling layer to text embeddings.
-        Args:
-            texts: Input text data.
-        Returns:
-            Pooled text embeddings.
-        """
+        
         return self.text_pooler(
             jnp.mean(
                 self.text_encoder(texts)[0], 
@@ -639,13 +570,7 @@ class CLIP(nn.Module):
 
     def embed_image(self, 
                     images: jnp.ndarray) -> jnp.ndarray:
-        """
-        Applies a pooling layer to image embeddings.
-        Args:
-            images: Input image data.
-        Returns:
-            Pooled image embeddings.
-        """
+        
         return self.image_pooler(
             jnp.mean(
                 self.image_encoder(images)[0], 
@@ -657,16 +582,26 @@ class CLIP(nn.Module):
 
 class CLIPDataParallelTrainer:
     """
-    A class for training a CLIP model using data parallelism.
+    Trainer class using data parallelism with JAX.
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
-        model: The CLIP model to be trained.
-        num_parameters: The number of parameters in the model.
-        best_val_loss: The best validation loss achieved during training.
-        weights_filename: Filename for saving the model weights.
-        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
-        train_step: A parallelized function for performing a training step.
-        state: The current state of the model, including parameters and optimizer state.
+        model (Any): The model to be trained.
+        text_input_shape (Tuple[int, ...]): The shape of the text input tensor.
+        image_input_shape (Tuple[int, ...]): The shape of the image input tensor.
+        weights_filename (str): Filename where the trained model weights will be saved.
+        learning_rate (float): Learning rate for the optimizer.
+        params_path (Optional[str]): Path to pre-trained model parameters for initializing the model, if available.
+
+    Methods:
+        create_train_state(learning_rate, text_input_shape, image_input_shape): Initializes the training state, including parameters and optimizer.
+        train_step(state, texts, images): Performs a single training step, including forward pass, loss computation, and gradients update.
+        train(train_loader, num_epochs, val_loader): Runs the training loop over the specified number of epochs, using the provided data loaders for training and validation.
+        evaluation_step(state, texts, images): Performs an evaluation step, computing forward pass and loss without updating model parameters.
+        evaluate(test_loader): Evaluates the model performance on a test dataset.
+        save_params(): Saves the model parameters to a file.
+        load_params(filename): Loads model parameters from a file.
     """
     def __init__(self, 
                  model: Any, 
@@ -691,17 +626,6 @@ class CLIPDataParallelTrainer:
     def create_train_state(self, learning_rate: float, 
                            text_input_shape: Tuple[int, ...], 
                            image_input_shape: Tuple[int, ...]) -> Any:
-        """
-        Creates and initializes the training state for the model.
-
-        Args:
-            learning_rate: The learning rate for the optimizer.
-            text_input_shape: The shape of the text input.
-            image_input_shape: The shape of the image input.
-
-        Returns:
-            The initialized training state.
-        """
         rng = jax.random.PRNGKey(0)
         params = self.model.init(rng, jnp.ones(text_input_shape, dtype=jnp.int32), jnp.ones(image_input_shape))['params']
 
@@ -718,16 +642,7 @@ class CLIPDataParallelTrainer:
     def train_step(state: Any, 
                    texts: jnp.ndarray,
                    images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step for the CLIP model.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'texts' and 'images' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         grad_fn = jax.value_and_grad(lambda params: state.apply_fn({'params': params}, 
                                                                 texts, 
                                                                 images, 
@@ -741,14 +656,7 @@ class CLIPDataParallelTrainer:
               train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
               num_epochs: int, 
               val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        """
-        Trains the model for a specified number of epochs.
-
-        Args:
-            train_loader: An iterable of training data batches.
-            num_epochs: The number of epochs to train for.
-            val_loader: An optional iterable of validation data batches.
-        """
+        
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -778,29 +686,13 @@ class CLIPDataParallelTrainer:
     def evaluation_step(state: Any, 
                    texts: jnp.ndarray,
                    images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step for the CLIP model.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'texts' and 'images' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         forward_fn = lambda params: state.apply_fn({'params': params}, texts, images)
         return forward_fn(state.params)
 
     def evaluate(self, 
                  test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        """
-        evaluates the model using the provided validation loader.
-
-        Args:
-            val_loader: An iterable of validation data batches.
-            epoch: The current epoch number.
-            num_epochs: The total number of epochs.
-        """
+        
         total_loss = 0.0
         count = 0
         for texts, images in test_loader:
@@ -815,17 +707,11 @@ class CLIPDataParallelTrainer:
         return total_loss / count
 
     def save_params(self) -> None:
-        """
-        Saves the unreplicated model parameters to a file.
-        """
         self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        """
-        Loads the model parameters from a file
-        """
         with open(filename, 'rb') as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

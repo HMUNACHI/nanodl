@@ -74,44 +74,27 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 class PatchEmbedding(nn.Module):
     """
-    A Flax module for patch embedding in a vision transformer.
+    Implements patch embedding for vision transformers.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
+    This module extracts patches from input images, flattens them, and projects them to a specified embedding dimension. Optionally, learned position embeddings can be added to the patch embeddings.
 
     Attributes:
-    patch_size (tuple): Size of the patches (height, width).
-    embed_dim (int): Dimension of the embedded patches.
-    """
+        patch_size (tuple): Size (height, width) of the patches to extract from input images.
+        embed_dim (int): Dimension of the embeddings for the patches.
 
+    Methods:
+        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
+        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
+    """
     patch_size: Tuple[int, int]
     embed_dim: int 
 
     @nn.compact
     def __call__(self, x):
-        """
-        Apply the PatchEmbedding module to input data.
-
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Embedded patches with shape (batch_size, num_patches, embed_dim).
-        """
         x = nn.Dense(self.embed_dim)(self.extract_patches(x))
         return x + nn.Embed(num_embeddings=x.shape[1], features=x.shape[2])(jnp.arange(x.shape[1]))
 
     def extract_patches(self, images: jnp.ndarray) -> jnp.ndarray:
-        """
-        Split multiple images into patches of a specified size and flatten each patch.
-
-        Args:
-        images (jax.numpy.ndarray): Input images as a JAX array with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Flattened array containing image patches for all input images.
-        """
         if len(images.shape) != 4:
             raise ValueError("Input images should have shape (batch_size, H, W, C)")
         
@@ -134,8 +117,18 @@ class PatchEmbedding(nn.Module):
 
 class SelfMultiHeadAttention(nn.Module):
     """
-    https://arxiv.org/abs/1706.03762 (Vaswani et. al. 2017)
-    This involves transforming the input by weighting features by importance.
+    Implements multi-head self-attention mechanism as described in "Attention is All You Need" by Vaswani et al 2017.
+
+    This module splits the input into multiple heads, applies scaled dot-product attention independently on each head, and then concatenates the results. It allows the model to jointly attend to information from different representation subspaces at different positions.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
+        num_heads (int): Number of attention heads.
+
+    Methods:
+        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
+        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
+        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
     hidden_dim : int  # Output dimension
     num_heads : int  # Number of parallel heads
@@ -155,14 +148,6 @@ class SelfMultiHeadAttention(nn.Module):
                  inputs: jnp.ndarray, 
                  mask: jnp.ndarray = None) -> tuple:
 
-        """
-        Args:
-            context: optional - context ((batch_size, seq_len, dims))
-            Mask: optional - masks where reqions to ignore are flipped to os
-                  regions to attend to are 1s (batch_size, seq_len, dims)
-        Return: outputs (batch_size, seq_len, seq_len)
-                attention matrixes (batch_size, heads, seq_len, seq_len)
-        """
         projections = self.projection(inputs)
         query, key, value = jnp.array_split(projections, 3, axis=-1)
         context_vectors, attention = self.attention_function(query,key, value, mask=mask)
@@ -192,11 +177,17 @@ class SelfMultiHeadAttention(nn.Module):
 
 class PositionWiseFFN(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Implements the position-wise feed-forward network of a transformer model.
 
-    Args:
-        num_hiddens (int): Number of hidden units in the feed-forward layers.
-        num_outputs (int): Number of output units in the feed-forward layers.
+    This module applies two linear transformations with a gelu activation in between, as per the original transformer model design. It is applied to each position separately and identically.
+
+    Attributes:
+        num_hiddens (int): The number of hidden units in the first linear layer.
+        num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
+
+    Methods:
+        setup(): Initializes the two linear layers.
+        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
     num_hiddens: int
     num_outputs: int
@@ -206,24 +197,20 @@ class PositionWiseFFN(nn.Module):
         self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFN to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the feed-forward network.
-        """
         return self.dense2(nn.gelu(self.dense1(X)))
 
 
 class AddNorm(nn.Module):
     """
-    Residual connection followed by layer normalization.
+    Implements a residual connection followed by layer normalization.
 
-    Args:
+    This module is a common building block in transformer models, promoting easier optimization and enabling deeper networks.
+
+    Attributes:
         dropout (float): Dropout rate for the residual connection.
+
+    Methods:
+        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
     dropout: int
 
@@ -247,13 +234,19 @@ class AddNorm(nn.Module):
 
 class ViTBlock(nn.Module):
     """
-    Transformer Encoder Block.
+    Represents a single block in the transformer encoder.
 
-    Args:
-        hidden_dim(int): Input dimension.
+    Each encoder block consists of a multi-head self-attention layer and a position-wise feed-forward network. Both sublayers have residual connections and are followed by layer normalization.
+
+    Attributes:
+        hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
+
+    Methods:
+        setup(): Initializes the attention, feed-forward network, and normalization layers.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
     hidden_dim: int
     num_heads: int
@@ -271,17 +264,7 @@ class ViTBlock(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the EncoderBlock to input data.
-
-        Args:
-            x (jnp.ndarray): Input tensor.
-            mask (jnp.ndarray, optional): Mask tensor. Defaults to None.
-            training (bool): Training mode.
-
-        Returns:
-            tuple: Output tensor and attention tensor.
-        """
+        
         attended_x, attention = self.attention(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         ff_output = self.ff(x)
@@ -291,20 +274,22 @@ class ViTBlock(nn.Module):
 
 class ViTEncoder(nn.Module):
     """
-    Vision Transformer (ViT) model for image encoding.
+    Implements a vision transformer (ViT) encoder for image processing.
 
-    Args:
-    patch_size (tuple): Size of the patches (height, width).
-    num_layers (int): Number of transformer encoder layers.
-    hidden_dim(int): Input dimension for the transformer encoder.
-    num_heads (int): Number of attention heads in the transformer encoder.
-    feedforward_dim (int): Dimension of the feedforward layers in the transformer encoder.
-    dropout (float): Dropout probability for regularization.
+    This module applies patch embedding to input images and then processes the resulting sequence of embedded patches through multiple transformer encoder blocks.
 
-    Note: The transformer MLP blocks were designed to have a bottleneck
-          As such, the embeddining dim and feedforward dim should be the same to 
+    Attributes:
+        patch_size (tuple): Size of the patches (height, width) to be extracted from input images.
+        num_layers (int): Number of transformer encoder blocks.
+        hidden_dim (int): Dimensionality of the input and output features for the transformer encoder.
+        num_heads (int): Number of attention heads in the transformer encoder.
+        feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
+        dropout (float): Dropout rate for regularization.
+
+    Methods:
+        setup(): Initializes the patch embedding and encoder blocks.
+        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
-
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -313,10 +298,6 @@ class ViTEncoder(nn.Module):
     dropout: float
 
     def setup(self):
-        """
-        Setup the ViT model architecture by initializing its components.
-        Initializes the embedding layer, transformer encoder blocks, and the output layer.
-        """
         self.embedding = PatchEmbedding(self.patch_size, 
                                         self.feedforward_dim)
         
@@ -330,14 +311,7 @@ class ViTEncoder(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the ViT model to input data.
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-        Returns:
-        jax.numpy.ndarray: Predicted class scores for each input sample.
-        jax.numpy.ndarray: Attention maps from the transformer encoder.
-        """
+        
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -372,11 +346,6 @@ class ViT(nn.Module):
     n_outputs: int
 
     def setup(self):
-        """
-        Setup the ViT model architecture by initializing its components.
-
-        Initializes the embedding layer, transformer encoder blocks, and the output layer.
-        """
         self.encoder = ViTEncoder(
             patch_size=self.patch_size,
             num_layers=self.num_layers,
@@ -392,16 +361,7 @@ class ViT(nn.Module):
                  x: jnp.ndarray, 
                  mask: jnp.ndarray = None, 
                  training: bool = False) -> tuple:
-        """
-        Apply the ViT model to input data.
-
-        Args:
-        x (jax.numpy.ndarray): Input data with shape (batch_size, height, width, channels).
-
-        Returns:
-        jax.numpy.ndarray: Predicted class scores for each input sample.
-        jax.numpy.ndarray: Attention maps from the transformer encoder.
-        """
+        
         x, attention_maps = self.encoder(x=x, mask=mask, training=training)
         x = self.dropout_layer(x, deterministic=not training)
 
@@ -411,15 +371,25 @@ class ViT(nn.Module):
 
 class ViTDataParallelTrainer:
     """
-    A class for training a GPT model using data parallelism.
+    Trainer class using data parallelism with JAX.
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
-        model: The GPT model to be trained.
-        num_parameters: The number of parameters in the model.
-        best_val_loss: The best validation loss achieved during training.
-        weights_filename: Filename for saving the model weights.
-        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
-        state: The current state of the model, including parameters and optimizer state.
+        model (Any): The model to be trained.
+        input_shape (Tuple[int, ...]): The shape of the image input tensor.
+        weights_filename (str): Filename where the trained model weights will be saved.
+        learning_rate (float): Learning rate for the optimizer.
+        params_path (Optional[str]): Path to pre-trained model parameters for initializing the model, if available.
+
+    Methods:
+        create_train_state(learning_rate, text_input_shape, image_input_shape): Initializes the training state, including parameters and optimizer.
+        train_step(state, texts, images): Performs a single training step, including forward pass, loss computation, and gradients update.
+        train(train_loader, num_epochs, val_loader): Runs the training loop over the specified number of epochs, using the provided data loaders for training and validation.
+        evaluation_step(state, texts, images): Performs an evaluation step, computing forward pass and loss without updating model parameters.
+        evaluate(test_loader): Evaluates the model performance on a test dataset.
+        save_params(): Saves the model parameters to a file.
+        load_params(filename): Loads model parameters from a file.
     """
     def __init__(self, 
                  model: Any, 
@@ -443,17 +413,7 @@ class ViTDataParallelTrainer:
     def create_train_state(self, 
                            learning_rate: float, 
                            input_shape: Tuple[int, ...]) -> Any:
-        """
-        Creates and initializes the training state for the model.
-
-        Args:
-            learning_rate: The learning rate for the optimizer.
-            text_input_shape: The shape of the text input.
-            image_input_shape: The shape of the image input.
-
-        Returns:
-            The initialized training state.
-        """
+        
         rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
         params = self.model.init(rngs, jnp.ones(input_shape))['params']
 
@@ -471,16 +431,7 @@ class ViTDataParallelTrainer:
     def train_step(state: Any, 
                    inputs: jnp.ndarray,
                    targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         def loss_fn(params):
             logits = state.apply_fn({'params': params}, 
                                     inputs, 
@@ -496,14 +447,7 @@ class ViTDataParallelTrainer:
               train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
               num_epochs: int, 
               val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        """
-        Trains the model for a specified number of epochs.
-
-        Args:
-            train_loader: An iterable of training data batches.
-            num_epochs: The number of epochs to train for.
-            val_loader: An optional iterable of validation data batches.
-        """
+        
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -534,29 +478,13 @@ class ViTDataParallelTrainer:
     def evaluation_step(state: Any, 
                         inputs: jnp.ndarray,
                         targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})[0]
         return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
 
     def evaluate(self, 
                  test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        """
-        evaluates the model using the provided validation loader.
-
-        Args:
-            val_loader: An iterable of validation data batches.
-            epoch: The current epoch number.
-            num_epochs: The total number of epochs.
-        """
+        
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
@@ -572,17 +500,11 @@ class ViTDataParallelTrainer:
         return mean_loss
 
     def save_params(self) -> None:
-        """
-        Saves the unreplicated model parameters to a file.
-        """
         self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        """
-        Loads the model parameters from a file
-        """
         with open(filename, 'rb') as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

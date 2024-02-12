@@ -100,8 +100,9 @@ from typing import List, Tuple, Any, Optional, Dict, Iterable
 
 
 class RelativeMultiHeadAttention(nn.Module):
-    hidden_dim : int  # Output dimension
-    num_heads : int  # Number of parallel heads
+    
+    hidden_dim : int 
+    num_heads : int 
 
     def setup(self):
         # Because the Query is determined from a context, project separately
@@ -128,17 +129,6 @@ class RelativeMultiHeadAttention(nn.Module):
                  mask: jnp.ndarray = None, 
                  clip: int = 3) -> tuple:
 
-        """
-        Args:
-            inputs: inputs ((batch_size, seq_len, dims))
-            context: optional - context ((batch_size, seq_len, dims))
-            clip: the k value at which to clip the relative position by
-            Mask: optional - masks where reqions to ignore are flipped to os
-                  regions to attend to are 1s (batch_size, seq_len, dims)
-
-        Return: outputs (batch_size, seq_len, seq_len)
-                attention matrixes (batch_size, heads, seq_len, seq_len)
-        """
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
@@ -181,11 +171,17 @@ class RelativeMultiHeadAttention(nn.Module):
 
 class PositionWiseFFN(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Implements the position-wise feed-forward network of a transformer model.
 
-    Args:
-        num_hiddens (int): Number of hidden units in the feed-forward layers.
-        num_outputs (int): Number of output units in the feed-forward layers.
+    This module applies two linear transformations with a GEGLU activation in between, as per the original transformer model design. It is applied to each position separately and identically.
+
+    Attributes:
+        num_hiddens (int): The number of hidden units in the first linear layer.
+        num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
+
+    Methods:
+        setup(): Initializes the two linear layers.
+        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
     num_hiddens: int
     num_outputs: int
@@ -196,24 +192,20 @@ class PositionWiseFFN(nn.Module):
         self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
-        """
-        Apply the PositionWiseFFN to input data.
-
-        Args:
-            X (jnp.ndarray): Input tensor.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying the feed-forward network.
-        """
         return self.dense2(self.activation(self.dense1(X)))
     
 
 class AddNorm(nn.Module):
     """
-    Residual connection followed by layer normalization.
+    Implements a residual connection followed by layer normalization.
 
-    Args:
+    This module is a common building block in transformer models, promoting easier optimization and enabling deeper networks.
+
+    Attributes:
         dropout (float): Dropout rate for the residual connection.
+
+    Methods:
+        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
     dropout: int
 
@@ -222,17 +214,7 @@ class AddNorm(nn.Module):
                  X: jnp.ndarray, 
                  Y: jnp.ndarray, 
                  training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
+        
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
     
@@ -538,15 +520,25 @@ class LaMDA(nn.Module):
 
 class LaMDADataParallelTrainer:
     """
-    A class for training a GPT model using data parallelism.
+    Trainer class using data parallelism with JAX.
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
-        model: The GPT model to be trained.
-        num_parameters: The number of parameters in the model.
-        best_val_loss: The best validation loss achieved during training.
-        weights_filename: Filename for saving the model weights.
-        num_devices: Number of local devices (GPUs/TPUs) used for parallel training.
-        state: The current state of the model, including parameters and optimizer state.
+        model (Any): The model to be trained.
+        input_shape (Tuple[int, ...]): The shape of the input tensor.
+        weights_filename (str): Filename where the trained model weights will be saved.
+        learning_rate (float): Learning rate for the optimizer.
+        params_path (Optional[str]): Path to pre-trained model parameters for initializing the model, if available.
+
+    Methods:
+        create_train_state(learning_rate, text_input_shape, image_input_shape): Initializes the training state, including parameters and optimizer.
+        train_step(state, texts, images): Performs a single training step, including forward pass, loss computation, and gradients update.
+        train(train_loader, num_epochs, val_loader): Runs the training loop over the specified number of epochs, using the provided data loaders for training and validation.
+        evaluation_step(state, texts, images): Performs an evaluation step, computing forward pass and loss without updating model parameters.
+        evaluate(test_loader): Evaluates the model performance on a test dataset.
+        save_params(): Saves the model parameters to a file.
+        load_params(filename): Loads model parameters from a file.
     """
     def __init__(self, 
                  model: Any, 
@@ -570,17 +562,7 @@ class LaMDADataParallelTrainer:
     def create_train_state(self, 
                            learning_rate: float, 
                            input_shape: Tuple[int, ...]) -> Any:
-        """
-        Creates and initializes the training state for the model.
-
-        Args:
-            learning_rate: The learning rate for the optimizer.
-            text_input_shape: The shape of the text input.
-            image_input_shape: The shape of the image input.
-
-        Returns:
-            The initialized training state.
-        """
+        
         rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
         params = self.model.init(rngs, jnp.ones(input_shape, dtype=jnp.int32))['params']
 
@@ -598,16 +580,7 @@ class LaMDADataParallelTrainer:
     def train_step(state: Any, 
                    inputs: jnp.ndarray,
                    targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         def loss_fn(params):
             logits = state.apply_fn({'params': params}, 
                                     inputs, 
@@ -623,14 +596,7 @@ class LaMDADataParallelTrainer:
               train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
               num_epochs: int, 
               val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        """
-        Trains the model for a specified number of epochs.
-
-        Args:
-            train_loader: An iterable of training data batches.
-            num_epochs: The number of epochs to train for.
-            val_loader: An optional iterable of validation data batches.
-        """
+        
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -661,29 +627,13 @@ class LaMDADataParallelTrainer:
     def evaluation_step(state: Any, 
                         inputs: jnp.ndarray,
                         targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        """
-        Performs a single training step.
-
-        Args:
-            state: The current state of the model, including parameters and optimizer state.
-            batch: A dictionary containing 'inputs' and 'targets' as keys, representing the input data.
-
-        Returns:
-            A tuple of the updated state and the loss value for this step.
-        """
+        
         logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})
         return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
 
     def evaluate(self, 
                  test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        """
-        evaluates the model using the provided validation loader.
-
-        Args:
-            val_loader: An iterable of validation data batches.
-            epoch: The current epoch number.
-            num_epochs: The total number of epochs.
-        """
+        
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
@@ -699,17 +649,11 @@ class LaMDADataParallelTrainer:
         return mean_loss
 
     def save_params(self) -> None:
-        """
-        Saves the unreplicated model parameters to a file.
-        """
         self.params = flax.jax_utils.unreplicate(self.state.params)
         with open(self.weights_filename, 'wb') as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        """
-        Loads the model parameters from a file
-        """
         with open(filename, 'rb') as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

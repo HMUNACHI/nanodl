@@ -1,38 +1,8 @@
-<p align="center">
-  <img src="assets/logo-2.jpg" alt="Alt text"/>
-</p>
+Usage
+=====
 
-# A Jax-based library for designing and training transformer models from scratch.
-
-![License](https://img.shields.io/github/license/hmunachi/nanodl?style=flat-square) ![Stars](https://img.shields.io/github/stars/hmunachi/nanodl?style=social) ![Forks](https://img.shields.io/github/forks/hmunachi/nanodl?style=social) ![Issues](https://img.shields.io/github/issues/hmunachi/nanodl?style=flat-square) [![LinkedIn](https://img.shields.io/badge/-LinkedIn-blue?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com//company/80434055) [![Twitter](https://img.shields.io/twitter/follow/hmunachii?style=social)](https://twitter.com/hmunachii)
-
-
-
-
-[**Overview**](#overview)
-| [**Quick install**](#quick-install)
-| [**What does NanoDL look like?**](#what-does-nanodl-look-like)
-| [**Documentation**](https://nan.readthedocs.io/)
-
-Nano Deep Learning (NanoDL) was built from helper functions written by [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) since 2022, and is now developed jointly with the open source community.
-
-## Overview
-
-Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
-
-- A wide array of blocks and layers, facilitating the creation of customised transformer models from scratch.
-- An extensive selection of models like LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Whisper, ViT, Mixers, GAT, CLIP, and more, catering to a variety of tasks and applications.
-- Data-parallel distributed trainers so developers can efficiently train large-scale models on multiple GPUs or TPUs, without the need for manual training loops.
-- Dataloaders, making the process of data handling for Jax/Flax more straightforward and effective.
-- Custom layers not found in Flax/Jax, such as RoPE, GQA, MQA, and SWin attention, allowing for more flexible model development.
-- GPU/TPU-accelerated classical ML models like PCA, KMeans, Regression, Gaussian Processes etc., akin to SciKit Learn on GPU.
-- Modular design so users can blend elements from various models, such as GPT, Mixtral, and LlaMa2, to craft unique hybrid transformer models.
-- A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU etc.
-- Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
-
-Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
-
-## Quick install
+Installation
+------------
 
 You will need Python 3.9 or later, and working [JAX](https://github.com/google/jax/blob/main/README.md)
 installation, [FLAX](https://github.com/google/flax/blob/main/README.md)
@@ -51,9 +21,8 @@ Then, install nanodl from PyPi:
 pip install nanodl
 ```
 
-## What does nanodl look like?
-
-We provide various examples using the nanodl API: language, vision and audio, starting with an LLM.
+Creating a GPT Model
+----------------
 
 ```py
 import jax
@@ -130,7 +99,10 @@ outputs = model.apply({'params': params},
                       method=model.generate)
 print(outputs) 
 ```
-Vision example
+
+Creating a Diffusion model
+----------------
+
 ```py
 import jax
 import jax.numpy as jnp
@@ -176,7 +148,9 @@ generated_images = diffusion_model.apply({'params': params},
 print(generated_images.shape)
 ```
 
-Audio example
+Creating a Whisper TTS model
+----------------
+
 ```py
 import jax
 import jax.numpy as jnp
@@ -247,7 +221,9 @@ transcripts = model.apply({'params': params},
 print(transcripts)
 ```
 
-PCA example
+Creating an Accelerated PCA
+----------------
+
 ```py
 import jax
 from nanodl import PCA
@@ -260,58 +236,44 @@ original_data = pca.inverse_transform(transformed_data)
 X_sampled = pca.sample(n_samples=1000, key=None)
 print(X_sampled.shape, original_data.shape, transformed_data.shape)
 ```
+GPU/TPU-accelerated versions of many models on SKLearn like NaiveBayesClassifier, Linear Regression, KMeans are available on NanoDL.
 
-# Contribution
+Using an individual module
+----------------
 
-This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Follow the recommended steps:
+Each contituent layer can be used in your own model.
 
-- Raise the issue/discussion to get second opinions
-- Fork the repository
-- Create a branch
-- Make your changes without ruining the design patterns
-- Write tests for your changes if necessary
-- Install locally with `pip install -e .`
-- Run tests with `python -m unittest discover -s tests`
-- Then submit a pull request from branch.
+```py
+from nanodl import GraphAttetnionLayer
 
-Contributions can be made in various forms:
+class GAT(nn.Module):
+    nfeat: int
+    nhid: int
+    nclass: int
+    dropout_rate: float
+    alpha: float
+    nheads: int
 
-- Writing documentation.
-- Fixing bugs.
-- Implementing papers.
-- Writing high-coverage tests.
-- OPtimizing existing codes.
-- Experimenting and submitting real-world examples to the examples section.
-- Reporting bugs.
-- Responding to reported issues.
+    @nn.compact
+    def __call__(self, 
+                 x: jnp.ndarray, 
+                 adj: jnp.ndarray, 
+                 training: bool = False) -> jnp.ndarray:
+        heads = [GraphAttentionLayer(self.nfeat, 
+                                     self.nhid, 
+                                     dropout_rate=self.dropout_rate, 
+                                     alpha=self.alpha, concat=True) for _ in range(self.nheads)]
+        
+        x = jnp.concatenate([head(x, adj, training) for head in heads], axis=1)
+        x = nn.Dropout(rate=self.dropout_rate, 
+                       deterministic=not training)(x)
 
-Coming features include:
-- Reinforcement Learning With Human Feedback (RLHF).
-- Tokenizers.
-- Code optimisations.
-
-To follow up or share thoughts, follow [here](https://forms.gle/vwveb9SKdPYywHx9A)
-
-## Sponsorships
-
-The name "NanoDL" stands for Nano Deep Learning. Models are exploding in size, therefore gate-keeping 
-experts and companies with limited resources from building flexible models without prohibitive costs.
-Following the success of Phi models, the long-term goal is to build and train nano versions of all available models,
-while ensuring they compete with the original models in performance, with total 
-number of parameters not exceeding 1B. Trained weights will be made available via this library.
-Any form of sponsorship, funding, grants or contribution will help with training resources.
-You can sponsor via the tag on the user profile, or reach out via ndubuakuhenry@gmail.com.
-
-## Citing nanodl
-
-To cite this repository:
-
+        out_att = GraphAttentionLayer(self.nhid * self.nheads, 
+                                      self.nclass, 
+                                      dropout_rate=self.dropout_rate, 
+                                      alpha=self.alpha, concat=False)
+        
+        return out_att(x, adj, training)
 ```
-@software{nanodl2024github,
-  author = {Henry Ndubuaku},
-  title = {NanoDL: A Jax-based library for designing and training transformer models from scratch.},
-  url = {http://github.com/hmunachi/nanodl},
-  version = {1.0.1dev},
-  year = {2024},
-}
-```
+
+With this, you could for example create a transformer model with T5 Encoder and LlaMa2 Decoder!
