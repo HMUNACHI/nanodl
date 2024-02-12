@@ -8,7 +8,24 @@ plugins:
       handlers:
         python:
           options:
-            docstring_style: sphinx
+            docstring_section_style: "list"
+            members_order: "source"
+            show_root_heading: true
+            show_source: false
+            show_signature_annotations: false
+            selection:
+              inheritance: true
+              filters:
+                - "!^_[^_]"  # Exclude members starting with a single underscore
+            rendering:
+              show_category_heading: true
+              heading_level: 3
+              docstring_styles: ["google", "numpy", "restructuredtext", "plain", "markdown"]
+            cross_references:
+              use_short_names: true
+              fail_on_missing_reference: false
+            introspection:
+              modules: ["nanodl"]
 markdown_extensions:
   - markdown_include.include:
       base_path: .
