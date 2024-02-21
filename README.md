@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo-2.png" alt="Alt text"/>
+  <img src="assets/logo.jpg" alt="Alt text"/>
 </p>
 
 # A Jax-based library for designing and training transformer models from scratch.
