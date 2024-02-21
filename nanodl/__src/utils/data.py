@@ -4,6 +4,11 @@ import jax.numpy as jnp
 from typing import Iterator
 from dataclasses import dataclass
 
+# This script modifies the JAX DataLoader from the following repository:
+# JAX DataLoader by Birkhoff G. (https://birkhoffg.github.io/jax-dataloader/)
+# Accessed on [Date you accessed the repository, e.g., February 4, 2024]
+# This DataLoader implementation is used for efficient data loading in JAX-based machine learning projects.
+
 class Dataset:
     """
     A PyTorch-like Dataset class for JAX.
