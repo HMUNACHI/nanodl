@@ -71,6 +71,11 @@ class TestTextBasedModels(unittest.TestCase):
                        num_groups=2)
         self._test_decoder_only_model(model)
 
+    def test_gemma_model(self):
+        model = Gemma(**self.hyperparams,
+                       num_groups=2)
+        self._test_decoder_only_model(model)
+
     def _test_encoder_decoder_model(self, model):
         rngs = {
             'params': jax.random.key(0), 

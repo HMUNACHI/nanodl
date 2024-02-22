@@ -20,16 +20,23 @@ Author: [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/)
 Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
 
 - A wide array of blocks and layers, facilitating the creation of customised transformer models from scratch.
-- An extensive selection of models like LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Whisper, ViT, Mixers, GAT, CLIP, and more, catering to a variety of tasks and applications.
-- Data-parallel distributed trainers so developers can efficiently train large-scale models on multiple GPUs or TPUs, without the need for manual training loops.
+- An extensive selection of models like Gemma, LlaMa2, Mistral, Mixtral, GPT3, GPT4 (inferred), T5, Whisper, ViT, Mixers, GAT, CLIP, and more, catering to a variety of tasks and applications.
+- Data-parallel distributed trainers includding RLHFPPO and RLHFDPO so developers can efficiently train large-scale models on multiple GPUs or TPUs, without the need for manual training loops.
 - Dataloaders, making the process of data handling for Jax/Flax more straightforward and effective.
 - Custom layers not found in Flax/Jax, such as RoPE, GQA, MQA, and SWin attention, allowing for more flexible model development.
 - GPU/TPU-accelerated classical ML models like PCA, KMeans, Regression, Gaussian Processes etc., akin to SciKit Learn on GPU.
 - Modular design so users can blend elements from various models, such as GPT, Mixtral, and LlaMa2, to craft unique hybrid transformer models.
+- True random number generators in Jax which do not need the verbose code.
 - A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU etc.
 - Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
+
+## What's New in version 1.2.0.dev1
+
+- Google's Gemma and MAMBA architectures.
+- Data parallel distributed RLHFPPO and RLHFDPO.
+- True random number generators in Jax which do not need the verbose code (examples shown in next sections).
 
 ## Quick install
 
@@ -260,7 +267,19 @@ X_sampled = pca.sample(n_samples=1000, key=None)
 print(X_sampled.shape, original_data.shape, transformed_data.shape)
 ```
 
-# Contribution
+NanoDL provides random module which abstracts away Jax's intricacies.
+It generates truly random variables by using the current timestamp as seed.
+```py
+# Jax example
+key = random.PRNGKey(0) 
+jax_array = random.uniform(key, shape=(3, 3))
+
+# NanoDL example
+jax_array = nanodl.uniform(shape=(3, 3))
+
+# For reproducability, use seed
+jax_array = nanodl.uniform(shape=(3, 3), seed=0)
+```
 
 This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Follow the recommended steps:
 

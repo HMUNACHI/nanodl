@@ -1,8 +1,9 @@
-__version__ = "1.0.0.dev1"
+__version__ = "1.2.0.dev1"
 
 from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
 from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
 from nanodl.__src.sklearn_gpu.clustering import KMeans, GaussianMixtureModel
+from nanodl.__src.utils.random import *
 
 from nanodl.__src.sklearn_gpu.regression import (
     LinearRegression, 
@@ -118,6 +119,13 @@ from nanodl.__src.models.transformer import (
     AddNorm
 )
 
+from nanodl.__src.models.gemma import (
+    Gemma,
+    GemmaDataParallelTrainer,
+    GemmaDecoder,
+    GemmaDecoderBlock
+)
+
 from nanodl.__src.utils.data import (
     Dataset, 
     ArrayDataset, 
@@ -170,6 +178,10 @@ __all__ = [
     "GaussianProcess",
     
     # Models
+    "Gemma",
+    "GemmaDataParallelTrainer",
+    "GemmaDecoder",
+    "GemmaDecoderBlock",
     "GAT", 
     "GraphAttentionLayer",
     "T5",
@@ -267,7 +279,27 @@ __all__ = [
     "normalize_images",
     "random_crop",
     "random_flip_image",
-    "sobel_edge_detection"
+    "sobel_edge_detection",
+    
+    # Random
+    "time_rng_key",
+    "uniform",
+    "normal",
+    "bernoulli",
+    "categorical",
+    "randint",
+    "permutation",
+    "gumbel",
+    "choice",
+    "binomial",
+    "bits",
+    "exponential",
+    "triangular",
+    "truncated_normal",
+    "poisson",
+    "geometric",
+    "gamma",
+    "chisquare",
 ]
 
 import importlib

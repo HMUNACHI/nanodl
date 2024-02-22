@@ -23,6 +23,7 @@ __pycache__/
 # Ignore configuration files with sensitive information
 config.ini
 secrets.yaml
+params.pkl
 
 # Ignore user-specific files
 /userdata/
