@@ -307,9 +307,7 @@ class GemmaDecoder(nn.Module):
 
 class Gemma(nn.Module):
     """
-    Implements the LLaMA2 model for text generation, featuring grouped rotary positional embeddings.
-
-    LLaMA2 enhances the transformer architecture by incorporating grouped rotary positional embeddings within its decoder blocks, aiming to improve the model's understanding of positional context and its ability to generate coherent and contextually relevant text.
+    Implements the Gemma model for text generation, featuring GQA + RMSNorm + RoPE.
 
     Attributes:
         num_layers (int): Number of layers (blocks) in the LLaMA2 model.

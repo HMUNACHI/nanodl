@@ -107,6 +107,12 @@ from nanodl.__src.models.diffusion import (
     UNetResidualBlock
 )
 
+from nanodl.__src.models.mamba import (
+    Mamba,
+    MambaDataParallelTrainer,
+    MambaBlock
+)
+
 from nanodl.__src.models.transformer import (
     Transformer,
     TransformerDataParallelTrainer,
@@ -231,6 +237,9 @@ __all__ = [
     "Mixtral",
     "MixtralDecoder",
     "MixtralDecoderBlock",
+    "Mamba",
+    "MambaDataParallelTrainer",
+    "MambaBlock"
     "Whisper",
     "WhisperDataParallelTrainer",
     "WhisperSpeechEncoder",
@@ -321,11 +330,15 @@ def test_jax(jax):
 def test_optax(optax):
     optimizer = optax.sgd(learning_rate=0.1)
 
+def test_einops(einops):
+    arr = einops.rearrange([1, 2, 3], 'a b c -> b a c')
+
 def main():
     try:
         flax = check_library_installed('flax')
         jax = check_library_installed('jax')
         optax = check_library_installed('optax')
+        einops = check_library_installed('einops')
 
         test_flax(flax)
         test_jax(jax)
