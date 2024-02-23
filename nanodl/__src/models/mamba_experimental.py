@@ -9,6 +9,7 @@ from einops import einsum
 from flax.training import train_state
 from typing import Tuple, Any, Optional, Iterable
 
+########## EXPERIMENMTAL ############
 
 class MambaBlock(nn.Module):
     """
@@ -252,8 +253,8 @@ class Mamba(nn.Module):
         # You might need to implement a custom method for weight tying or handle it outside the model definition.
 
     def __call__(self, 
-                 input_ids: jnp.Array, 
-                 training: bool = False) -> jnp.Array:
+                 input_ids: jnp.ndarray, 
+                 training: bool = False) -> jnp.ndarray:
         
         x = self.embedding(input_ids)
         for layer in self.layers:
@@ -262,6 +263,19 @@ class Mamba(nn.Module):
         x = self.norm_f(x)
         logits = self.lm_head(x)
         return logits
+    
+
+    def zero_pad(self, arr, max_length):
+        current_length = arr.shape[1]
+        num_zeros = max_length - current_length
+
+        if num_zeros > 0:
+            zeros = jnp.zeros((arr.shape[0], num_zeros), dtype=arr.dtype)
+            padded_array = jnp.concatenate([arr, zeros], axis=1)
+        else:
+            padded_array = arr
+
+        return padded_array
     
 
     def generate(self, 
@@ -276,8 +290,10 @@ class Mamba(nn.Module):
         output_sequence = []
 
         # Autoregressive decoding loop
-        for _ in range(self.max_length):
-            decoder_output = self.__call__(decoder_input, training=False)[0]
+        print(self.zero_pad(decoder_input, self.max_length).shape)
+        for _ in range(self.max_length-1):
+            decoder_output = self.__call__(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+            print(decoder_output.shape)
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -291,7 +307,7 @@ class Mamba(nn.Module):
             output_sequence.append(next_token.item())
             decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
 
-            if next_token.item() == self.end_token:
+            if next_token.item() == self.end_token or len(output_sequence) == self.max_length:
                 break
 
         return jnp.array(output_sequence)
@@ -306,8 +322,8 @@ class Mamba(nn.Module):
         decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
-        for i in range(self.max_length):
-            decoder_output = self.__call__(decoder_input, training=False)[0]
+        for i in range(self.max_length-1):
+            decoder_output = self.__call__(self.zero_pad(decoder_input, self.max_length), training=False)[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -321,11 +337,10 @@ class Mamba(nn.Module):
             output_sequences = output_sequences.at[:, i].set(next_token)
             decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
 
-            if jnp.all(next_token == self.end_token):
+            if jnp.all(next_token == self.end_token) or len(output_sequences) == self.max_length:
                 break
 
         return output_sequences
-
 
 
 class MambaDataParallelTrainer:
@@ -531,19 +546,7 @@ outputs = model.apply({'params': params},
 
 print(outputs.shape)
 
-# Training on data
-trainer = MambaDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-trainer.train(train_loader=dataloader, 
-            num_epochs=2, 
-            val_loader=dataloader)
-
-print(trainer.evaluate(dataloader))
-
-# Generating from a start token
 start_tokens = jnp.array([[123, 456]])
-
-# Remember to load the trained parameters 
-params = trainer.load_params('params.pkl')
 outputs = model.apply({'params': params},
                     start_tokens,
                     rngs={'dropout': jax.random.PRNGKey(2)}, 

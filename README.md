@@ -34,9 +34,12 @@ Feedback on any of our discussion, issue and pull request threads are welcomed! 
 
 ## What's New in version 1.2.0.dev1
 
-- Google's Gemma and MAMBA architectures.
+- Google's Gemma architecture.
 - Data parallel distributed RLHFPPO and RLHFDPO.
 - True random number generators in Jax which do not need the verbose code (examples shown in next sections).
+
+There are experimental features (like MAMBA architecture) in the repo which is not available via the package,
+pending tests.
 
 ## Quick install
 

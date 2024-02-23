@@ -107,11 +107,6 @@ from nanodl.__src.models.diffusion import (
     UNetResidualBlock
 )
 
-from nanodl.__src.models.mamba import (
-    Mamba,
-    MambaDataParallelTrainer,
-    MambaBlock
-)
 
 from nanodl.__src.models.transformer import (
     Transformer,
