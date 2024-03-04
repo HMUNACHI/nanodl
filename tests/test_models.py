@@ -119,6 +119,19 @@ class TestTextBasedModels(unittest.TestCase):
             outputs.shape, 
             (self.batch_size, self.max_length - 1, self.vocab_size)
             )
+        
+    def test_reward_model(self):
+        model = RewardModel(Mixtral(**self.hyperparams, 
+                        num_groups=2, 
+                        window_size=5, 
+                        shift_size=2), dim=self.hyperparams['hidden_dim'], dropout=0.1)
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        params = model.init({'params': rngs, 'dropout': dropout_rng}, self.dummy_inputs)['params']
+        rewards = model.apply({'params': params}, 
+                            self.dummy_inputs, 
+                            rngs={'dropout': dropout_rng})
+        assert rewards.shape == (self.batch_size, 1)
 
 
 class TestVisionBasedModels(unittest.TestCase):

@@ -127,6 +127,11 @@ from nanodl.__src.models.gemma import (
     GemmaDecoderBlock
 )
 
+from nanodl.__src.models.reward import (
+    RewardModel,
+    RewardDataParallelTrainer
+)
+
 from nanodl.__src.utils.data import (
     Dataset, 
     ArrayDataset, 
@@ -232,13 +237,12 @@ __all__ = [
     "Mixtral",
     "MixtralDecoder",
     "MixtralDecoderBlock",
-    "Mamba",
-    "MambaDataParallelTrainer",
-    "MambaBlock"
     "Whisper",
     "WhisperDataParallelTrainer",
     "WhisperSpeechEncoder",
     "WhisperSpeechEncoderBlock",
+    "RewardModel",
+    "RewardDataParallelTrainer",
     "DiffusionModel",
     "DiffusionDataParallelTrainer",
     "UNet",
