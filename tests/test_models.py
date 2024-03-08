@@ -131,7 +131,7 @@ class TestTextBasedModels(unittest.TestCase):
         rewards = model.apply({'params': params}, 
                             self.dummy_inputs, 
                             rngs={'dropout': dropout_rng})
-        assert rewards.shape == (self.batch_size, 1)
+        assert rewards.shape == (self.batch_size,)
 
 
 class TestVisionBasedModels(unittest.TestCase):

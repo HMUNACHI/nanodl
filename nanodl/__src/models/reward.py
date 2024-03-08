@@ -80,8 +80,8 @@ class RewardModel(nn.Module):
         
         x = self.model(x, training=training, drop_last_layer=True)
         x = nn.Dropout(rate=self.dropout)(x, deterministic=not training)
-        x = nn.Dense(1)(x[:, -1:, 0])
-        return nn.sigmoid(x)
+        x = nn.Dense(1)(x)
+        return nn.sigmoid(x)[:, -1, 0]
     
 
 class RewardDataParallelTrainer:
