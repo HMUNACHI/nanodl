@@ -4,11 +4,11 @@ import jax.numpy as jnp
 from jax import random
 from typing import Any, Union, Tuple
 
-def time_rng_key(seed=None) -> jax.random.KeyArray:
+def time_rng_key(seed=None) -> jnp.ndarray:
     """Generate a JAX random key based on the current UNIX timestamp.
 
     Returns:
-        jax.random.KeyArray: A JAX random key.
+        jnp.ndarray: A JAX random key.
     """
     key = int(time.time()) if seed is None else seed
     return random.PRNGKey(seed)

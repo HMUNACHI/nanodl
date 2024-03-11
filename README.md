@@ -35,11 +35,10 @@ Feedback on any of our discussion, issue and pull request threads are welcomed! 
 ## What's New in version 1.2.0.dev1
 
 - Google's Gemma architecture.
-- Data parallel distributed Reward and RLHF trainers.
+- Reward model wrapper and data-parallel distributed reward trainer.
 - True random number generators in Jax which do not need the verbose code (examples shown in next sections).
 
-There are experimental features (like MAMBA architecture) in the repo which is not available via the package,
-pending tests.
+There are experimental features (like MAMBA architecture and RLHF) in the repo which is not available via the package, pending tests.
 
 ## Quick install
 
@@ -359,15 +358,10 @@ Contributions can be made in various forms:
 - Fixing bugs.
 - Implementing papers.
 - Writing high-coverage tests.
-- OPtimizing existing codes.
+- Optimizing existing codes.
 - Experimenting and submitting real-world examples to the examples section.
 - Reporting bugs.
 - Responding to reported issues.
-
-Coming features include:
-- Reinforcement Learning With Human Feedback (RLHF).
-- Tokenizers.
-- Code optimisations.
 
 To follow up or share thoughts, follow [here](https://forms.gle/vwveb9SKdPYywHx9A)
 

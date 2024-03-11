@@ -132,6 +132,14 @@ from nanodl.__src.models.reward import (
     RewardDataParallelTrainer
 )
 
+from nanodl.__src.layers.attention import (
+    MultiQueryAttention,
+    LocalMultiHeadAttention,
+    HierarchicalMultiHeadAttention,
+    GatedMultiHeadAttention,
+    RotaryMultiHeadAttention
+)
+
 from nanodl.__src.utils.data import (
     Dataset, 
     ArrayDataset, 
@@ -288,6 +296,11 @@ __all__ = [
     "random_crop",
     "random_flip_image",
     "sobel_edge_detection",
+    "MultiQueryAttention",
+    "LocalMultiHeadAttention",
+    "HierarchicalMultiHeadAttention",
+    "GatedMultiHeadAttention",
+    "RotaryMultiHeadAttention",
     
     # Random
     "time_rng_key",
