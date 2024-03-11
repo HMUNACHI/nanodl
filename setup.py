@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='nanodl',
-    version='1.0.1.dev1',
+    version='1.2.0.dev1',
     author='Henry Ndubuaku',
     author_email='ndubuakuhenry@gmail.com',
     description='A Jax-based library for designing and training transformer models from scratch.',

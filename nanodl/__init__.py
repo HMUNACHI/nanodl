@@ -1,8 +1,9 @@
-__version__ = "1.0.0.dev1"
+__version__ = "1.2.0.dev1"
 
 from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
 from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
 from nanodl.__src.sklearn_gpu.clustering import KMeans, GaussianMixtureModel
+from nanodl.__src.utils.random import *
 
 from nanodl.__src.sklearn_gpu.regression import (
     LinearRegression, 
@@ -106,6 +107,7 @@ from nanodl.__src.models.diffusion import (
     UNetResidualBlock
 )
 
+
 from nanodl.__src.models.transformer import (
     Transformer,
     TransformerDataParallelTrainer,
@@ -116,6 +118,26 @@ from nanodl.__src.models.transformer import (
     TokenAndPositionEmbedding,
     MultiHeadAttention,
     AddNorm
+)
+
+from nanodl.__src.models.gemma import (
+    Gemma,
+    GemmaDataParallelTrainer,
+    GemmaDecoder,
+    GemmaDecoderBlock
+)
+
+from nanodl.__src.models.reward import (
+    RewardModel,
+    RewardDataParallelTrainer
+)
+
+from nanodl.__src.layers.attention import (
+    MultiQueryAttention,
+    LocalMultiHeadAttention,
+    HierarchicalMultiHeadAttention,
+    GatedMultiHeadAttention,
+    RotaryMultiHeadAttention
 )
 
 from nanodl.__src.utils.data import (
@@ -170,6 +192,10 @@ __all__ = [
     "GaussianProcess",
     
     # Models
+    "Gemma",
+    "GemmaDataParallelTrainer",
+    "GemmaDecoder",
+    "GemmaDecoderBlock",
     "GAT", 
     "GraphAttentionLayer",
     "T5",
@@ -223,6 +249,8 @@ __all__ = [
     "WhisperDataParallelTrainer",
     "WhisperSpeechEncoder",
     "WhisperSpeechEncoderBlock",
+    "RewardModel",
+    "RewardDataParallelTrainer",
     "DiffusionModel",
     "DiffusionDataParallelTrainer",
     "UNet",
@@ -267,7 +295,32 @@ __all__ = [
     "normalize_images",
     "random_crop",
     "random_flip_image",
-    "sobel_edge_detection"
+    "sobel_edge_detection",
+    "MultiQueryAttention",
+    "LocalMultiHeadAttention",
+    "HierarchicalMultiHeadAttention",
+    "GatedMultiHeadAttention",
+    "RotaryMultiHeadAttention",
+    
+    # Random
+    "time_rng_key",
+    "uniform",
+    "normal",
+    "bernoulli",
+    "categorical",
+    "randint",
+    "permutation",
+    "gumbel",
+    "choice",
+    "binomial",
+    "bits",
+    "exponential",
+    "triangular",
+    "truncated_normal",
+    "poisson",
+    "geometric",
+    "gamma",
+    "chisquare",
 ]
 
 import importlib
@@ -289,11 +342,15 @@ def test_jax(jax):
 def test_optax(optax):
     optimizer = optax.sgd(learning_rate=0.1)
 
+def test_einops(einops):
+    arr = einops.rearrange([1, 2, 3], 'a b c -> b a c')
+
 def main():
     try:
         flax = check_library_installed('flax')
         jax = check_library_installed('jax')
         optax = check_library_installed('optax')
+        einops = check_library_installed('einops')
 
         test_flax(flax)
         test_jax(jax)

@@ -2,3 +2,4 @@ jax
 jaxlib
 flax
 optax
+einops

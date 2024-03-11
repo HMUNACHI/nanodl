@@ -484,14 +484,9 @@ class DiffusionDataParallelTrainer:
         return mean_loss
     
     def get_ema_weights(self, params, ema=0.999):
-        
-        new_params = {}
-        for key, value in params.items():
-            if isinstance(value, dict):
-                new_params[key] = self.get_ema_weights(value, ema)
-            else:
-                new_params[key] = ema * value + (1 - ema) * value
-        return new_params
+        def func(x):
+            return x * ema + (1 - ema) * x
+        return jax.tree_util.tree_map(func, params)
 
     def save_params(self) -> None:
         self.params = flax.jax_utils.unreplicate(self.state.params)
