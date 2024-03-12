@@ -8,7 +8,7 @@ import flax.linen as nn
 from flax.training import train_state
 from typing import Tuple, Any, Optional, Iterable
 
-
+# Still in active development
 class RLHF(nn.Module):
     policy_network: Any
     reference: bool = False
@@ -244,72 +244,72 @@ class PPODataParallelTrainer:
 
 
 
-from nanodl import ArrayDataset, DataLoader
-from nanodl import Gemma, GemmaDataParallelTrainer
-from nanodl import RewardModel, RewardDataParallelTrainer
-# from nanodl import RLHF, PPODataParallelTrainer
+# from nanodl import ArrayDataset, DataLoader
+# from nanodl import Gemma, GemmaDataParallelTrainer
+# from nanodl import RewardModel, RewardDataParallelTrainer
+# # from nanodl import RLHF, PPODataParallelTrainer
 
-batch_size = 8
-max_length = 10
-model_params_path = 'base_params.pkl'
-rlhf_params_path = 'rlhf_params.pkl'
-reward_params_path = 'reward_params.pkl'
+# batch_size = 8
+# max_length = 10
+# model_params_path = 'base_params.pkl'
+# rlhf_params_path = 'rlhf_params.pkl'
+# reward_params_path = 'reward_params.pkl'
 
-# model parameters
-hyperparams = {
-    'num_layers': 1,
-    'hidden_dim': 128,
-    'num_heads': 2,
-    'feedforward_dim': 128,
-    'dropout': 0.1,
-    'vocab_size': 200,
-    'embed_dim': 128,
-    'max_length': max_length,
-    'start_token': 0,
-    'end_token': 50,
-    'num_groups': 2,
-}
+# # model parameters
+# hyperparams = {
+#     'num_layers': 1,
+#     'hidden_dim': 128,
+#     'num_heads': 2,
+#     'feedforward_dim': 128,
+#     'dropout': 0.1,
+#     'vocab_size': 200,
+#     'embed_dim': 128,
+#     'max_length': max_length,
+#     'start_token': 0,
+#     'end_token': 50,
+#     'num_groups': 2,
+# }
 
-print('Step 1: Pretraining')
-# Replace with actual tokenised data
-data = jnp.ones((101, max_length), dtype=jnp.int32)
-dummy_inputs = data[:, :-1]
-dummy_targets = data[:, 1:]
-dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-model = Gemma(**hyperparams)
-# trainer = GemmaDataParallelTrainer(model, dummy_inputs.shape, model_params_path)
-# trainer.train(train_loader=dataloader, num_epochs=2, val_loader=dataloader)
-
-print('\nStep 2: Superfised Fine-Tuning')
-# Replace with actual tokenised data
-dummy_prompt = jnp.ones((101, max_length), dtype=jnp.int32)
-dummy_chosen = jnp.ones((101, max_length), dtype=jnp.int32)
-dummy_rejected = jnp.zeros((101, max_length), dtype=jnp.int32)
-# dataset = ArrayDataset(dummy_prompt, dummy_chosen)
+# print('Step 1: Pretraining')
+# # Replace with actual tokenised data
+# data = jnp.ones((101, max_length), dtype=jnp.int32)
+# dummy_inputs = data[:, :-1]
+# dummy_targets = data[:, 1:]
+# dataset = ArrayDataset(dummy_inputs, dummy_targets)
 # dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 # model = Gemma(**hyperparams)
-# trainer = GemmaDataParallelTrainer(model, dummy_prompt.shape, model_params_path)
-# trainer.train(train_loader=dataloader, num_epochs=2, val_loader=dataloader)
+# # trainer = GemmaDataParallelTrainer(model, dummy_inputs.shape, model_params_path)
+# # trainer.train(train_loader=dataloader, num_epochs=2, val_loader=dataloader)
 
-print('\nStep 3: Train a reward model')
-dataset = ArrayDataset(dummy_chosen, dummy_rejected)
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-reward_model = RewardModel(Gemma(**hyperparams), dim=hyperparams['hidden_dim'], dropout=0.1)
-# trainer = RewardDataParallelTrainer(reward_model, dummy_chosen.shape, reward_params_path)
-# trainer.train(dataloader, 2, dataloader)
+# print('\nStep 2: Superfised Fine-Tuning')
+# # Replace with actual tokenised data
+# dummy_prompt = jnp.ones((101, max_length), dtype=jnp.int32)
+# dummy_chosen = jnp.ones((101, max_length), dtype=jnp.int32)
+# dummy_rejected = jnp.zeros((101, max_length), dtype=jnp.int32)
+# # dataset = ArrayDataset(dummy_prompt, dummy_chosen)
+# # dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+# # model = Gemma(**hyperparams)
+# # trainer = GemmaDataParallelTrainer(model, dummy_prompt.shape, model_params_path)
+# # trainer.train(train_loader=dataloader, num_epochs=2, val_loader=dataloader)
 
-print('\nStep 4: Train the RLHF model via PPO, using a reference model and the reward model.')
-rlhf_model = RLHF(model)
-rlhf_ref = RLHF(model, reference=True)
-dataset = ArrayDataset(dummy_chosen)
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-trainer = PPODataParallelTrainer(rlhf_model, 
-                                 rlhf_ref, 
-                                 reward_model, 
-                                 dummy_inputs.shape, 
-                                 rlhf_params_path,
-                                 sft_params_path=model_params_path,
-                                 reward_params_path=reward_params_path)
+# print('\nStep 3: Train a reward model')
+# dataset = ArrayDataset(dummy_chosen, dummy_rejected)
+# dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+# reward_model = RewardModel(Gemma(**hyperparams), dim=hyperparams['hidden_dim'], dropout=0.1)
+# # trainer = RewardDataParallelTrainer(reward_model, dummy_chosen.shape, reward_params_path)
+# # trainer.train(dataloader, 2, dataloader)
 
-trainer.train(dataloader, 2)
+# print('\nStep 4: Train the RLHF model via PPO, using a reference model and the reward model.')
+# rlhf_model = RLHF(model)
+# rlhf_ref = RLHF(model, reference=True)
+# dataset = ArrayDataset(dummy_chosen)
+# dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+# trainer = PPODataParallelTrainer(rlhf_model, 
+#                                  rlhf_ref, 
+#                                  reward_model, 
+#                                  dummy_inputs.shape, 
+#                                  rlhf_params_path,
+#                                  sft_params_path=model_params_path,
+#                                  reward_params_path=reward_params_path)
+
+# trainer.train(dataloader, 2)

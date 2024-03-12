@@ -32,7 +32,7 @@ Developing and training transformer-based models is typically resource-intensive
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
-## What's New in version 1.2.0.dev1
+## What's New in version 1.2.1.dev1
 
 - Google's Gemma architecture.
 - Reward model wrapper and data-parallel distributed reward trainer.
@@ -330,9 +330,11 @@ NanoDL provides random module which abstracts away Jax's intricacies.
 It generates truly random variables by using the current timestamp as seed.
 
 ```py
+import jax 
+
 # Jax example
-key = random.PRNGKey(0) 
-jax_array = random.uniform(key, shape=(3, 3))
+key = jax.random.PRNGKey(0) 
+jax_array = jax.random.uniform(key, shape=(3, 3))
 
 # NanoDL example
 jax_array = nanodl.uniform(shape=(3, 3))
