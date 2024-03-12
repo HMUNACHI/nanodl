@@ -1,4 +1,4 @@
-__version__ = "1.2.0.dev1"
+__version__ = "1.2.1.dev1"
 
 from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
 from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
