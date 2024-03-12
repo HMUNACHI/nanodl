@@ -11,7 +11,7 @@ def time_rng_key(seed=None) -> jnp.ndarray:
         jnp.ndarray: A JAX random key.
     """
     key = int(time.time()) if seed is None else seed
-    return random.PRNGKey(seed)
+    return random.PRNGKey(key)
 
 def uniform(shape: Tuple[int, ...], 
             dtype: Any = jnp.float32, 

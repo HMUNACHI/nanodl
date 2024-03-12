@@ -15,7 +15,7 @@ class TestRandomFunctions(unittest.TestCase):
         self.assertTrue(jnp.array_equal(key1, key2), "Keys should be equal for the same seed")
 
     def test_uniform(self):
-        result = uniform((2, 3), seed=42)
+        result = uniform((2, 3))
         self.assertEqual(result.shape, (2, 3))
         self.assertEqual(result.dtype, jnp.float32)
 
