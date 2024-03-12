@@ -50,7 +50,7 @@ Models can be designed and tested on CPUs but trainers are all Distributed Data-
 
 ```
 pip install --upgrade pip # To support manylinux2010 wheels.
-pip install jax, flax, optax
+pip install jax flax optax
 ```
 
 Then, install nanodl from PyPi:
