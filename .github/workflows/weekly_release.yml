@@ -1,0 +1,51 @@
+name: Weekly Release
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # Runs every Sunday at 00:00 UTC
+
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0  # Fetch all commits to get accurate version number
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools wheel twine bumpversion
+
+    - name: Update version number
+      run: |
+        # Update the version number in setup.py and __init__.py
+        bumpversion --current-version $(python setup.py --version) --new-version $(bumpversion --list minor --new-minor-version --no-commit | grep new_minor_version | sed 's/new_minor_version=//') minor setup.py nanodl/__init__.py
+
+        # Configure Git user
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+        # Commit the version changes
+        git add setup.py nanodl/__init__.py
+        git commit -m "Bump version"
+
+    - name: Build and publish
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        python setup.py sdist bdist_wheel
+        twine upload dist/*
+
+    - name: Git tag
+      run: |
+        git tag v$(python setup.py --version)
+        git push origin v$(python setup.py --version)

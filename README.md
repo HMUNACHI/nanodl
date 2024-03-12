@@ -29,16 +29,12 @@ Developing and training transformer-based models is typically resource-intensive
 - True random number generators in Jax which do not need the verbose code.
 - A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU etc.
 - Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
+- True random number generators in Jax which do not need the verbose code (examples shown in next sections).
 
 Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
 
-## What's New in version 1.2.1.dev1
 
-- Google's Gemma architecture.
-- Reward model wrapper and data-parallel distributed reward trainer.
-- True random number generators in Jax which do not need the verbose code (examples shown in next sections).
-
-There are experimental features (like MAMBA architecture and RLHF) in the repo which is not available via the package, pending tests.
+There are experimental features (like MAMBA architecture and RLHF) in the repo which are not available via the package, pending tests.
 
 ## Quick install
 
