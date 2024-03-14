@@ -164,28 +164,6 @@ def choice(a: Union[int, jnp.ndarray],
                          p=p, 
                          axis=axis)
 
-def binomial(n: int, 
-             p: float, 
-             shape: Tuple[int, ...] = (), 
-             dtype: Any = jnp.float32,
-             seed=None) -> jnp.ndarray:
-    """Draw samples from a binomial distribution.
-
-    Args:
-        n (int): The number of trials.
-        p (float): The probability of success of an individual trial.
-        shape (Tuple[int, ...], optional): The shape of the output tensor. Defaults to ().
-        dtype (Any, optional): The data type of the output tensor. Defaults to jnp.int32.
-
-    Returns:
-        jnp.ndarray: A tensor of samples from a binomial distribution.
-    """
-    return random.binomial(time_rng_key(seed), 
-                           n, 
-                           p, 
-                           shape=shape, 
-                           dtype=dtype)
-
 def bits(shape: Tuple[int, ...], 
          dtype: Any = jnp.uint32,
          seed=None) -> jnp.ndarray:

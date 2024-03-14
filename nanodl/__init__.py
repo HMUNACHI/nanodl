@@ -3,6 +3,7 @@ __version__ = "1.2.1.dev1"
 from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
 from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
 from nanodl.__src.sklearn_gpu.clustering import KMeans, GaussianMixtureModel
+from nanodl.__src.utils.tokenizer import Tokenizer
 from nanodl.__src.utils.random import *
 
 from nanodl.__src.sklearn_gpu.regression import (
@@ -271,6 +272,7 @@ __all__ = [
     "Dataset", 
     "ArrayDataset", 
     "DataLoader",
+    "Tokenizer",
     "batch_cosine_similarities",
     "batch_pearsonr",
     "classification_scores",
@@ -312,7 +314,6 @@ __all__ = [
     "permutation",
     "gumbel",
     "choice",
-    "binomial",
     "bits",
     "exponential",
     "triangular",

@@ -3,3 +3,4 @@ jaxlib
 flax
 optax
 einops
+sentencepiece

@@ -27,7 +27,7 @@ Developing and training transformer-based models is typically resource-intensive
 - GPU/TPU-accelerated classical ML models like PCA, KMeans, Regression, Gaussian Processes etc., akin to SciKit Learn on GPU.
 - Modular design so users can blend elements from various models, such as GPT, Mixtral, and LlaMa2, to craft unique hybrid transformer models.
 - True random number generators in Jax which do not need the verbose code.
-- A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU etc.
+- A range of advanced algorithms for NLP and computer vision tasks, such as Gaussian Blur, BLEU, Tokenizer etc.
 - Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
 - True random number generators in Jax which do not need the verbose code (examples shown in next sections).
 

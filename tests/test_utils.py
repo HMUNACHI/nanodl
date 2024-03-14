@@ -245,5 +245,22 @@ class TestVisionFunctions(unittest.TestCase):
         self.assertEqual(flipped_image.shape, (5, 5, 3))
 
 
+class TestTokenizerEncodingDecoding(unittest.TestCase):
+    def setUp(self):
+        """Set up the tokenizer with specific training data."""
+        text_paths = ['tests/files/sample.txt']
+        self.tokenizer = Tokenizer(training_data=text_paths,
+                                   vocab_size=100,
+                                   model_type='bpe',
+                                   max_sentence_length=50)
+
+    def test_encode_decode(self):
+        """Test that encoding followed by decoding returns the original sentence."""
+        test_sentence = "Hello, test"
+        encoded_sentence = self.tokenizer.encode(test_sentence)
+        decoded_sentence = self.tokenizer.decode(encoded_sentence)
+        self.assertEqual(test_sentence, decoded_sentence)
+
+
 if __name__ == '__main__':
     unittest.main()

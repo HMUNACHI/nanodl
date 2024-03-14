@@ -2,7 +2,7 @@ import unittest
 import jax.numpy as jnp
 from nanodl import (
     time_rng_key, uniform, normal, bernoulli, categorical, randint,
-    permutation, gumbel, choice, binomial, bits, exponential,
+    permutation, gumbel, choice, bits, exponential,
     triangular, truncated_normal, poisson, geometric, gamma,
     chisquare
 )
@@ -53,10 +53,6 @@ class TestRandomFunctions(unittest.TestCase):
     def test_choice(self):
         result = choice(5, shape=(3,), seed=42)
         self.assertEqual(result.shape, (3,))
-
-    def test_binomial(self):
-        result = binomial(10, 0.5, (2, 2), seed=42)
-        self.assertEqual(result.shape, (2, 2))
 
     def test_bits(self):
         result = bits((2, 2), seed=42)
