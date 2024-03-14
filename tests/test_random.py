@@ -2,7 +2,7 @@ import unittest
 import jax.numpy as jnp
 from nanodl import (
     time_rng_key, uniform, normal, bernoulli, categorical, randint,
-    permutation, gumbel, choice, binomial, bits, exponential,
+    permutation, gumbel, choice, bits, exponential,
     triangular, truncated_normal, poisson, geometric, gamma,
     chisquare
 )
