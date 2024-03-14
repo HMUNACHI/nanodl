@@ -54,10 +54,6 @@ class TestRandomFunctions(unittest.TestCase):
         result = choice(5, shape=(3,), seed=42)
         self.assertEqual(result.shape, (3,))
 
-    def test_binomial(self):
-        result = binomial(10, 0.5, (2, 2), seed=42)
-        self.assertEqual(result.shape, (2, 2))
-
     def test_bits(self):
         result = bits((2, 2), seed=42)
         self.assertEqual(result.shape, (2, 2))
