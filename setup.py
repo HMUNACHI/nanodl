@@ -15,6 +15,8 @@ setup(
         'jax',
         'jaxlib',
         'optax',
+        'einops',
+        'sentencepiece',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
