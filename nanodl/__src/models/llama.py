@@ -208,9 +208,9 @@ class LlaMA2DecoderBlock(nn.Module):
                                                           num_heads=self.num_heads,
                                                           num_groups=self.num_groups)
         self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.norm1 = nn.RMSNorm(self.dropout)
-        self.norm2 = nn.RMSNorm(self.dropout)
-        self.norm3 = nn.RMSNorm(self.dropout)
+        self.norm1 = nn.RMSNorm()
+        self.norm2 = nn.RMSNorm()
+        self.norm3 = nn.RMSNorm()
         self.dropout1 = nn.Dropout(self.dropout)
         self.dropout2 = nn.Dropout(self.dropout)
         self.dropout3 = nn.Dropout(self.dropout)

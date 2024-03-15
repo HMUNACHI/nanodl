@@ -218,8 +218,8 @@ class TransformerEncoderBlock(nn.Module):
         self.attention = MultiHeadAttention(hidden_dim=self.hidden_dim,
                                             num_heads=self.num_heads)
         self.linear = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
+        self.add_norm1 = AddNorm()
+        self.add_norm2 = AddNorm()
 
     def __call__(self, 
                  x: jnp.ndarray, 
@@ -313,9 +313,9 @@ class TransformerDecoderBlock(nn.Module):
         self.attention1 = MultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
         self.attention2 = MultiHeadAttention(hidden_dim=self.hidden_dim, num_heads=self.num_heads)
         self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
-        self.add_norm3 = AddNorm(self.dropout)
+        self.add_norm1 = AddNorm()
+        self.add_norm2 = AddNorm()
+        self.add_norm3 = AddNorm()
 
     def causal_mask(self, 
                 batch_size: int, 

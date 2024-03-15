@@ -210,8 +210,8 @@ class EncoderBlock(nn.Module):
         self.attention = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, 
                                                 num_heads=self.num_heads)
         self.ff = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
-        self.add_norm1 = AddNorm(self.dropout)
-        self.add_norm2 = AddNorm(self.dropout)
+        self.add_norm1 = AddNorm()
+        self.add_norm2 = AddNorm()
 
     def __call__(self, 
                  x: jnp.ndarray, 
