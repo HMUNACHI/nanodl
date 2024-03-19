@@ -309,16 +309,13 @@ jax_array = nanodl.uniform(shape=(3, 3))
 jax_array = nanodl.uniform(shape=(3, 3), seed=0)
 ```
 
-This is the first iteration of this project, roughness is expected, contributions are therefore highly encouraged! Follow the recommended steps:
+This is the first iteration of this project, roughness is expected, and contributions are therefore highly encouraged! 
 
-- Raise the issue/discussion to get second opinions
-- Fork the repository
-- Create a branch
 - Make your changes without changing the design patterns
 - Write tests for your changes if necessary
 - Install locally with `pip install -e .`
 - Run tests with `python -m unittest discover -s tests`
-- Then submit a pull request from branch.
+- Then submit a pull request.
 
 Contributions can be made in various forms:
 
