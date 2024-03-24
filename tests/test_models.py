@@ -351,5 +351,94 @@ class TestGATModel(unittest.TestCase):
         self.assertEqual(output.shape, (self.num_nodes, self.nclass))
 
 
+class TestIJEPAModel(unittest.TestCase):
+    def setUp(self):
+        self.image_size = 128
+        self.num_channels = 3
+        self.patch_size = 16
+        self.embed_dim = 32
+        self.predictor_bottleneck = 16
+        self.num_heads = 4
+        self.predictor_num_heads = 4
+        self.num_layers = 2
+        self.predictor_num_layers = 1
+        self.dropout_p = 0
+        self.num_patches = (self.image_size ** 2) / (self.patch_size ** 2)
+
+
+        self.x = jax.random.normal(
+            jax.random.PRNGKey(0), 
+            (1, self.image_size, self.image_size, self.num_channels)
+            )
+        
+        self.model = IJEPA(
+            image_size=self.image_size,
+            num_channels=self.num_channels,
+            patch_size=self.patch_size,
+            embed_dim=self.embed_dim,
+            predictor_bottleneck=self.predictor_bottleneck,
+            num_heads=self.num_heads,
+            predictor_num_heads=self.predictor_num_heads,
+            num_layers=self.num_layers,
+            predictor_num_layers=self.predictor_num_layers,
+            dropout_p=self.dropout_p,
+        )
+
+        self.data_sampler = IJEPADataSampler(
+            image_size=self.image_size,
+            M=4, 
+            patch_size=self.patch_size
+        )
+        
+    def test_ijepa_data_sampling(self):
+        context_mask, target_mask = self.data_sampler()
+        self.assertEqual(context_mask.shape, (4, self.num_patches))
+        self.assertEqual(target_mask.shape, (4, self.num_patches))
+
+    def test_ijepa_model_initialization_and_processing(self):
+        context_mask, target_mask = self.data_sampler()
+
+        params = self.model.init(
+            jax.random.key(0), 
+            self.x, 
+            context_mask[jnp.newaxis],
+            target_mask[jnp.newaxis],
+            training=False
+        )
+        
+        outputs , _ = self.model.apply(
+            params, 
+            self.x,
+            context_mask[jnp.newaxis],
+            target_mask[jnp.newaxis], 
+            training=False
+        )
+
+        self.assertEqual(len(outputs), 4)
+        self.assertEqual(outputs[0][0].shape, (1, self.num_patches, self.embed_dim))
+        self.assertEqual(outputs[0][0].shape, outputs[0][1].shape)
+
+
+    def test_ijepa_training(self):
+        x = jax.random.normal(
+            jax.random.PRNGKey(0), 
+            (9, self.image_size, self.image_size, self.num_channels)
+        )
+
+        dataset = ArrayDataset(x)
+
+        dataloader = DataLoader(dataset,
+                                batch_size=3, 
+                                shuffle=True, 
+                                drop_last=False)
+        
+        data_sampler = IJEPADataSampler(
+            image_size=self.image_size,
+            patch_size=self.patch_size
+        )
+
+        trainer = IJEPADataParallelTrainer(self.model, x.shape, 'params.pkl', data_sampler=data_sampler)
+        trainer.train(dataloader, 10, dataloader)
+
 if __name__ == '__main__':
     unittest.main()

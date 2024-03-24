@@ -133,6 +133,12 @@ from nanodl.__src.models.reward import (
     RewardDataParallelTrainer
 )
 
+from nanodl.__src.models.ijepa import (
+    IJEPA,
+    IJEPADataParallelTrainer,
+    IJEPADataSampler
+)
+
 from nanodl.__src.layers.attention import (
     MultiQueryAttention,
     LocalMultiHeadAttention,
@@ -193,6 +199,9 @@ __all__ = [
     "GaussianProcess",
     
     # Models
+    "IJEPA",
+    "IJEPADataParallelTrainer",
+    "IJEPADataSampler",
     "Gemma",
     "GemmaDataParallelTrainer",
     "GemmaDecoder",
