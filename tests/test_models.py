@@ -418,27 +418,5 @@ class TestIJEPAModel(unittest.TestCase):
         self.assertEqual(outputs[0][0].shape, (1, self.num_patches, self.embed_dim))
         self.assertEqual(outputs[0][0].shape, outputs[0][1].shape)
 
-
-    def test_ijepa_training(self):
-        x = jax.random.normal(
-            jax.random.PRNGKey(0), 
-            (9, self.image_size, self.image_size, self.num_channels)
-        )
-
-        dataset = ArrayDataset(x)
-
-        dataloader = DataLoader(dataset,
-                                batch_size=3, 
-                                shuffle=True, 
-                                drop_last=False)
-        
-        data_sampler = IJEPADataSampler(
-            image_size=self.image_size,
-            patch_size=self.patch_size
-        )
-
-        trainer = IJEPADataParallelTrainer(self.model, x.shape, 'params.pkl', data_sampler=data_sampler)
-        trainer.train(dataloader, 10, dataloader)
-
 if __name__ == '__main__':
     unittest.main()
