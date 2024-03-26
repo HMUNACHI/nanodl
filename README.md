@@ -5,8 +5,8 @@
 # A Jax-based library for designing and training transformer models from scratch.
 
 ![[License](https://img.shields.io/github/license/hmunachi/nanodl?style=flat-square) 
-![Read the Docs](https://img.shields.io/readthedocs/nanodl)(https://nanodl.readthedocs.io)
-![Discord](https://img.shields.io/discord/1222217369816928286)(https://discord.gg/3u9vumJEmz)
+![Read the Docs](https://img.shields.io/readthedocs/nanodl)
+![Discord](https://img.shields.io/discord/1222217369816928286)
 ![Stars](https://img.shields.io/github/stars/hmunachi/nanodl?style=social) 
 ![Forks](https://img.shields.io/github/forks/hmunachi/nanodl?style=social) 
 ![Issues](https://img.shields.io/github/issues/hmunachi/nanodl?style=flat-square) 
