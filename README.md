@@ -4,17 +4,12 @@
 
 # A Jax-based library for designing and training transformer models from scratch.
 
-![License](https://img.shields.io/github/license/hmunachi/nanodl?style=flat-square) ![Stars](https://img.shields.io/github/stars/hmunachi/nanodl?style=social) ![Forks](https://img.shields.io/github/forks/hmunachi/nanodl?style=social) ![Issues](https://img.shields.io/github/issues/hmunachi/nanodl?style=flat-square) [![LinkedIn](https://img.shields.io/badge/-LinkedIn-blue?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com//company/80434055) [![Twitter](https://img.shields.io/twitter/follow/hmunachii?style=social)](https://twitter.com/hmunachii)
+![License](https://img.shields.io/github/license/hmunachi/nanodl?style=flat-square) [![Read the Docs](https://img.shields.io/readthedocs/nanodl?labelColor=blue&color=white)](https://nanodl.readthedocs.io) [![Discord](https://img.shields.io/discord/1222217369816928286?style=social&logo=discord&label=Discord&color=white)](https://discord.gg/3u9vumJEmz) [![LinkedIn](https://img.shields.io/badge/-LinkedIn-blue?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com//company/80434055) [![Twitter](https://img.shields.io/twitter/follow/hmunachii?style=social)](https://twitter.com/hmunachii)
 
+Author: [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/) (Discord & Docs badges are clickable)
 
-
-
-[**Overview**](#overview)
-| [**Quick install**](#quick-install)
-| [**What does NanoDL look like?**](#what-does-nanodl-look-like)
-| [**Documentation**](https://nanodl.readthedocs.io/)
-
-Author: [Henry Ndubuaku](https://www.linkedin.com/in/henry-ndubuaku-7b6350b8/)
+N/B: Codes are implemented pedagogically at the expense of repetition. 
+Each model is purposefully contained in a file without inter-file dependencies. 
 
 ## Overview
 Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
@@ -31,10 +26,10 @@ Developing and training transformer-based models is typically resource-intensive
 - Each model is contained in a single file with no external dependencies, so the source code can also be easily used. 
 - True random number generators in Jax which do not need the verbose code (examples shown in next sections).
 
-Feedback on any of our discussion, issue and pull request threads are welcomed! Please report any feature requests, issues, questions or concerns in the [discussion forum](https://github.com/hmunachi/nanodl/discussions), or just let us know what you're working on! In case you want to reach out directly, we're at ndubuakuhenry@gmail.com.
-
-
 There are experimental features (like MAMBA architecture and RLHF) in the repo which are not available via the package, pending tests.
+Feedback on any of our discussion, issue and pull request threads are welcomed! 
+Please report any feature requests, issues, questions or concerns in the [Discord](https://discord.gg/3u9vumJEmz), 
+or just let us know what you're working on!
 
 ## Quick install
 
@@ -42,7 +37,8 @@ You will need Python 3.9 or later, and working [JAX](https://github.com/google/j
 installation, [FLAX](https://github.com/google/flax/blob/main/README.md)
 installation, [OPTAX](https://github.com/google-deepmind/optax/blob/main/README.md)
 installation (with GPU support for running training, without can only support creations).
-Models can be designed and tested on CPUs but trainers are all Distributed Data-Parallel which would require a GPU with 1 to N GPUS/TPUS. For CPU-only version of JAX:
+Models can be designed and tested on CPUs but trainers are all Distributed Data-Parallel 
+which would require a GPU with 1 to N GPUS/TPUS. For CPU-only version of JAX:
 
 ```
 pip install --upgrade pip # To support manylinux2010 wheels.
@@ -311,10 +307,10 @@ jax_array = nanodl.uniform(shape=(3, 3), seed=0)
 
 This is the first iteration of this project, roughness is expected, and contributions are therefore highly encouraged! 
 
-- Make your changes without changing the design patterns
-- Write tests for your changes if necessary
-- Install locally with `pip install -e .`
-- Run tests with `python -m unittest discover -s tests`
+- Make your changes without changing the design patterns.
+- Write tests for your changes if necessary.
+- Install locally with `pip install -e .`.
+- Run tests with `python -m unittest discover -s tests`.
 - Then submit a pull request.
 
 Contributions can be made in various forms:
@@ -328,7 +324,7 @@ Contributions can be made in various forms:
 - Reporting bugs.
 - Responding to reported issues.
 
-To follow up or share thoughts, follow [here](https://forms.gle/vwveb9SKdPYywHx9A)
+Join the [Discord Server](https://discord.gg/3u9vumJEmz) for more.
 
 ## Sponsorships
 
@@ -337,8 +333,8 @@ experts and companies with limited resources from building flexible models witho
 Following the success of Phi models, the long-term goal is to build and train nano versions of all available models,
 while ensuring they compete with the original models in performance, with total 
 number of parameters not exceeding 1B. Trained weights will be made available via this library.
-Any form of sponsorship, funding, grants or contribution will help with training resources.
-You can sponsor via the user profile tag or reach out via ndubuakuhenry@gmail.com.
+Any form of sponsorship, funding will help with training resources.
+You can either sponsor via GitHub [here](https://github.com/sponsors/HMUNACHI) or reach out via ndubuakuhenry@gmail.com.
 
 ## Citing nanodl
 
@@ -349,7 +345,6 @@ To cite this repository:
   author = {Henry Ndubuaku},
   title = {NanoDL: A Jax-based library for designing and training transformer models from scratch.},
   url = {http://github.com/hmunachi/nanodl},
-  version = {1.0.1dev},
   year = {2024},
 }
 ```
