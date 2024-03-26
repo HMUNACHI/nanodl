@@ -14,8 +14,6 @@
 ![Twitter](https://img.shields.io/twitter/follow/hmunachii?style=social)](https://twitter.com/hmunachii)
 
 
-
-
 [**Overview**](#overview)
 | [**Quick install**](#quick-install)
 | [**What does NanoDL look like?**](#what-does-nanodl-look-like)
