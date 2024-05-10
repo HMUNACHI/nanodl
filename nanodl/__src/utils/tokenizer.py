@@ -55,8 +55,8 @@ class Tokenizer:
     ```
     """
     def __init__(self, 
-                 training_data: List[str], 
-                 vocab_size: int, 
+                 training_data: List[str] = None, 
+                 vocab_size: int = None, 
                  model_type: str = "bpe", 
                  max_sentence_length: int = 512,
                  model_path: Optional[str] = None):
