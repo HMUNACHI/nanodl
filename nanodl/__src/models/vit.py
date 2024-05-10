@@ -5,7 +5,7 @@ import optax
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
-from typing import List, Tuple, Any, Optional, Dict, Iterable
+from typing import Tuple, Any, Optional, Iterable
 
 class PatchEmbedding(nn.Module):
     """
