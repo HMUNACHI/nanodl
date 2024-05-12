@@ -1,8 +1,7 @@
-import jax, flax, optax, time
+import jax
 import jax.numpy as jnp
 from flax import linen as nn
-from flax.training import train_state
-from typing import Any, Tuple, Optional, Iterable
+
 
 class GraphAttentionLayer(nn.Module):
     """
@@ -29,6 +28,7 @@ class GraphAttentionLayer(nn.Module):
             Returns:
                 jnp.ndarray: The output node features after the attention mechanism. If `concat` is True, applies a non-linearity (LeakyReLU); otherwise, returns the linear combination of features directly. Shape is (N, out_features).
     """
+
     in_features: int
     out_features: int
     dropout_rate: float
@@ -36,34 +36,35 @@ class GraphAttentionLayer(nn.Module):
     concat: bool = True
 
     @nn.compact
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 adj: jnp.ndarray, 
-                 training: bool) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, adj: jnp.ndarray, training: bool) -> jnp.ndarray:
 
-        W = self.param('W', jax.nn.initializers.glorot_uniform(), 
-                       (self.in_features, self.out_features))
-        
-        a = self.param('a', jax.nn.initializers.glorot_uniform(), 
-                       (2 * self.out_features, 1))
+        W = self.param(
+            "W",
+            jax.nn.initializers.glorot_uniform(),
+            (self.in_features, self.out_features),
+        )
+
+        a = self.param(
+            "a", jax.nn.initializers.glorot_uniform(), (2 * self.out_features, 1)
+        )
 
         h = jnp.dot(x, W)
-        h = nn.Dropout(rate=self.dropout_rate, 
-                       deterministic=not training)(h)
+        h = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(h)
 
         N = h.shape[0]
-        a_input = jnp.concatenate([h[:, None, :].repeat(N, axis=1), 
-                                   h[None, :, :].repeat(N, axis=0)], axis=2)
-        
-        e = nn.leaky_relu(jnp.dot(a_input, a).squeeze(-1), 
-                          negative_slope=self.alpha)
+        a_input = jnp.concatenate(
+            [h[:, None, :].repeat(N, axis=1), h[None, :, :].repeat(N, axis=0)], axis=2
+        )
+
+        e = nn.leaky_relu(jnp.dot(a_input, a).squeeze(-1), negative_slope=self.alpha)
 
         zero_vec = -9e15 * jnp.ones_like(e)
         attention = jnp.where(adj > 0, e, zero_vec)
         attention = nn.softmax(attention, axis=1)
 
-        attention = nn.Dropout(rate=self.dropout_rate, 
-                               deterministic=not training)(attention)
+        attention = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(
+            attention
+        )
 
         h_prime = jnp.matmul(attention, h)
 
@@ -75,13 +76,13 @@ class GraphAttentionLayer(nn.Module):
 
 class GAT(nn.Module):
     """
-    Graph Attention Networks (GATs) are a type of neural network designed for graph-structured data. 
-    The key feature of GATs is the use of attention mechanisms to weigh the importance of nodes' neighbors. 
-    This allows GATs to focus on the most relevant parts of the graph structure when learning node representations. 
-    In GATs, each node aggregates information from its neighbors, but not all neighbors contribute equally. 
-    The attention mechanism computes weights that determine the importance of each neighbor's features to the target node. 
+    Graph Attention Networks (GATs) are a type of neural network designed for graph-structured data.
+    The key feature of GATs is the use of attention mechanisms to weigh the importance of nodes' neighbors.
+    This allows GATs to focus on the most relevant parts of the graph structure when learning node representations.
+    In GATs, each node aggregates information from its neighbors, but not all neighbors contribute equally.
+    The attention mechanism computes weights that determine the importance of each neighbor's features to the target node.
     These weights are learned during training and are based on the features of the nodes involved.
-    GATs can handle graphs with varying sizes and connectivity patterns, making them suitable for a wide range of applications, 
+    GATs can handle graphs with varying sizes and connectivity patterns, making them suitable for a wide range of applications,
     including social network analysis, recommendation systems, and molecular structure analysis.
 
     Example usage:
@@ -105,11 +106,11 @@ class GAT(nn.Module):
     adj = jax.random.bernoulli(key, 0.3, (num_nodes, num_nodes))  # Random adjacency matrix
 
     # Initialize the GAT model
-    model = GAT(nfeat=num_features, 
-                nhid=8, 
-                nclass=nclass, 
-                dropout_rate=0.5, 
-                alpha=0.2, 
+    model = GAT(nfeat=num_features,
+                nhid=8,
+                nclass=nclass,
+                dropout_rate=0.5,
+                alpha=0.2,
                 nheads=3)
 
     # Initialize the model parameters
@@ -138,6 +139,7 @@ class GAT(nn.Module):
             Returns:
                 jnp.ndarray: The output node features after passing through the GAT model. Shape is (N, nclass), representing the class scores for each node.
     """
+
     nfeat: int
     nhid: int
     nclass: int
@@ -146,24 +148,31 @@ class GAT(nn.Module):
     nheads: int
 
     @nn.compact
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 adj: jnp.ndarray, 
-                 training: bool = False) -> jnp.ndarray:
+    def __call__(
+        self, x: jnp.ndarray, adj: jnp.ndarray, training: bool = False
+    ) -> jnp.ndarray:
 
-        heads = [GraphAttentionLayer(self.nfeat, 
-                                     self.nhid, 
-                                     dropout_rate=self.dropout_rate, 
-                                     alpha=self.alpha, concat=True) for _ in range(self.nheads)]
-        
+        heads = [
+            GraphAttentionLayer(
+                self.nfeat,
+                self.nhid,
+                dropout_rate=self.dropout_rate,
+                alpha=self.alpha,
+                concat=True,
+            )
+            for _ in range(self.nheads)
+        ]
+
         x = jnp.concatenate([head(x, adj, training) for head in heads], axis=1)
-        
-        x = nn.Dropout(rate=self.dropout_rate, 
-                       deterministic=not training)(x)
 
-        out_att = GraphAttentionLayer(self.nhid * self.nheads, 
-                                      self.nclass, 
-                                      dropout_rate=self.dropout_rate, 
-                                      alpha=self.alpha, concat=False)
-        
+        x = nn.Dropout(rate=self.dropout_rate, deterministic=not training)(x)
+
+        out_att = GraphAttentionLayer(
+            self.nhid * self.nheads,
+            self.nclass,
+            dropout_rate=self.dropout_rate,
+            alpha=self.alpha,
+            concat=False,
+        )
+
         return out_att(x, adj, training)

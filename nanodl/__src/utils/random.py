@@ -1,8 +1,10 @@
-import jax
 import time
+from typing import Any, Tuple, Union
+
+import jax
 import jax.numpy as jnp
 from jax import random
-from typing import Any, Union, Tuple
+
 
 def time_rng_key(seed=None) -> jnp.ndarray:
     """Generate a JAX random key based on the current UNIX timestamp.
@@ -13,11 +15,14 @@ def time_rng_key(seed=None) -> jnp.ndarray:
     key = int(time.time()) if seed is None else seed
     return random.PRNGKey(key)
 
-def uniform(shape: Tuple[int, ...], 
-            dtype: Any = jnp.float32, 
-            minval: float = 0.0, 
-            maxval: float = 1.0,
-            seed=None) -> jnp.ndarray:
+
+def uniform(
+    shape: Tuple[int, ...],
+    dtype: Any = jnp.float32,
+    minval: float = 0.0,
+    maxval: float = 1.0,
+    seed=None,
+) -> jnp.ndarray:
     """Generate a tensor of uniform random values.
 
     Args:
@@ -29,15 +34,12 @@ def uniform(shape: Tuple[int, ...],
     Returns:
         jnp.ndarray: A tensor of uniform random values.
     """
-    return random.uniform(time_rng_key(seed), 
-                          shape, 
-                          dtype=dtype, 
-                          minval=minval, 
-                          maxval=maxval)
+    return random.uniform(
+        time_rng_key(seed), shape, dtype=dtype, minval=minval, maxval=maxval
+    )
 
-def normal(shape: Tuple[int, ...], 
-           dtype: Any = jnp.float32,
-           seed=None) -> jnp.ndarray:
+
+def normal(shape: Tuple[int, ...], dtype: Any = jnp.float32, seed=None) -> jnp.ndarray:
     """Generate a tensor of normal random values.
 
     Args:
@@ -47,12 +49,10 @@ def normal(shape: Tuple[int, ...],
     Returns:
         jnp.ndarray: A tensor of normal random values.
     """
-    return random.normal(time_rng_key(seed), 
-                         shape, dtype=dtype)
+    return random.normal(time_rng_key(seed), shape, dtype=dtype)
 
-def bernoulli(p: float, 
-              shape: Tuple[int, ...] = (),
-              seed=None) -> jnp.ndarray:
+
+def bernoulli(p: float, shape: Tuple[int, ...] = (), seed=None) -> jnp.ndarray:
     """Generate random boolean values with a given probability.
 
     Args:
@@ -64,10 +64,10 @@ def bernoulli(p: float,
     """
     return random.bernoulli(time_rng_key(seed), p, shape)
 
-def categorical(logits: jnp.ndarray, 
-                axis: int = -1, 
-                shape: Tuple[int, ...] = (),
-                seed=None) -> jnp.ndarray:
+
+def categorical(
+    logits: jnp.ndarray, axis: int = -1, shape: Tuple[int, ...] = (), seed=None
+) -> jnp.ndarray:
     """Draw samples from a categorical distribution.
 
     Args:
@@ -78,16 +78,12 @@ def categorical(logits: jnp.ndarray,
     Returns:
         jnp.ndarray: The sampled indices with the specified shape.
     """
-    return random.categorical(time_rng_key(seed), 
-                              logits, 
-                              axis=axis, 
-                              shape=shape)
+    return random.categorical(time_rng_key(seed), logits, axis=axis, shape=shape)
 
-def randint(shape: Tuple[int, ...], 
-            minval: int, 
-            maxval: int, 
-            dtype: str = 'int32',
-            seed=None) -> jnp.ndarray:
+
+def randint(
+    shape: Tuple[int, ...], minval: int, maxval: int, dtype: str = "int32", seed=None
+) -> jnp.ndarray:
     """Generate random integers between minval (inclusive) and maxval (exclusive).
 
     Args:
@@ -99,15 +95,10 @@ def randint(shape: Tuple[int, ...],
     Returns:
         jnp.ndarray: A tensor of random integers.
     """
-    return random.randint(time_rng_key(seed), 
-                          shape, 
-                          minval, 
-                          maxval, 
-                          dtype=dtype)
+    return random.randint(time_rng_key(seed), shape, minval, maxval, dtype=dtype)
 
-def permutation(x: Union[int, jnp.ndarray], 
-                axis: int = 0,
-                seed=None) -> jnp.ndarray:
+
+def permutation(x: Union[int, jnp.ndarray], axis: int = 0, seed=None) -> jnp.ndarray:
     """Randomly permute a sequence, or return a permuted range.
 
     Args:
@@ -123,9 +114,8 @@ def permutation(x: Union[int, jnp.ndarray],
     else:
         return random.permutation(time_rng_key(seed), x, axis=axis)
 
-def gumbel(shape: Tuple[int, ...], 
-           dtype: Any = jnp.float32,
-           seed=None) -> jnp.ndarray:
+
+def gumbel(shape: Tuple[int, ...], dtype: Any = jnp.float32, seed=None) -> jnp.ndarray:
     """Draw samples from a Gumbel distribution.
 
     Args:
@@ -137,12 +127,15 @@ def gumbel(shape: Tuple[int, ...],
     """
     return random.gumbel(time_rng_key(seed), shape, dtype=dtype)
 
-def choice(a: Union[int, jnp.ndarray], 
-           shape: Tuple[int, ...] = (), 
-           replace: bool = True, 
-           p: Union[None, jnp.ndarray] = None, 
-           axis: int = 0,
-           seed=None) -> jnp.ndarray:
+
+def choice(
+    a: Union[int, jnp.ndarray],
+    shape: Tuple[int, ...] = (),
+    replace: bool = True,
+    p: Union[None, jnp.ndarray] = None,
+    axis: int = 0,
+    seed=None,
+) -> jnp.ndarray:
     """Randomly choose elements from a given 1-D array.
 
     Args:
@@ -157,16 +150,12 @@ def choice(a: Union[int, jnp.ndarray],
     """
     if isinstance(a, int):
         a = jnp.arange(a)
-    return random.choice(time_rng_key(seed), 
-                         a, 
-                         shape=shape, 
-                         replace=replace, 
-                         p=p, 
-                         axis=axis)
+    return random.choice(
+        time_rng_key(seed), a, shape=shape, replace=replace, p=p, axis=axis
+    )
 
-def bits(shape: Tuple[int, ...], 
-         dtype: Any = jnp.uint32,
-         seed=None) -> jnp.ndarray:
+
+def bits(shape: Tuple[int, ...], dtype: Any = jnp.uint32, seed=None) -> jnp.ndarray:
     """Generate random bits.
 
     Args:
@@ -178,9 +167,10 @@ def bits(shape: Tuple[int, ...],
     """
     return random.bits(time_rng_key(seed), shape, dtype=dtype)
 
-def exponential(shape: Tuple[int, ...], 
-                dtype: Any = jnp.float32,
-                seed=None) -> jnp.ndarray:
+
+def exponential(
+    shape: Tuple[int, ...], dtype: Any = jnp.float32, seed=None
+) -> jnp.ndarray:
     """Draw samples from an exponential distribution.
 
     Args:
@@ -192,11 +182,10 @@ def exponential(shape: Tuple[int, ...],
     """
     return random.exponential(time_rng_key(seed), shape, dtype=dtype)
 
-def triangular(left: float, 
-               right: float, 
-               mode: float, 
-               shape: Tuple[int, ...] = (),
-               seed=None) -> jnp.ndarray:
+
+def triangular(
+    left: float, right: float, mode: float, shape: Tuple[int, ...] = (), seed=None
+) -> jnp.ndarray:
     """Draw samples from a triangular distribution.
 
     Args:
@@ -210,11 +199,14 @@ def triangular(left: float,
     """
     return random.triangular(time_rng_key(seed), left, right, mode, shape)
 
-def truncated_normal(lower: float, 
-                     upper: float, 
-                     shape: Tuple[int, ...] = (), 
-                     dtype: Any = jnp.float32,
-                     seed=None) -> jnp.ndarray:
+
+def truncated_normal(
+    lower: float,
+    upper: float,
+    shape: Tuple[int, ...] = (),
+    dtype: Any = jnp.float32,
+    seed=None,
+) -> jnp.ndarray:
     """Draw samples from a truncated normal distribution.
 
     Args:
@@ -226,16 +218,12 @@ def truncated_normal(lower: float,
     Returns:
         jnp.ndarray: A tensor of samples from a truncated normal distribution.
     """
-    return random.truncated_normal(time_rng_key(seed), 
-                                   lower, 
-                                   upper, 
-                                   shape, 
-                                   dtype)
+    return random.truncated_normal(time_rng_key(seed), lower, upper, shape, dtype)
 
-def poisson(lam: float, 
-            shape: Tuple[int, ...] = (), 
-            dtype: Any = jnp.int32,
-            seed=None) -> jnp.ndarray:
+
+def poisson(
+    lam: float, shape: Tuple[int, ...] = (), dtype: Any = jnp.int32, seed=None
+) -> jnp.ndarray:
     """Draw samples from a Poisson distribution.
 
     Args:
@@ -246,15 +234,12 @@ def poisson(lam: float,
     Returns:
         jnp.ndarray: A tensor of samples from a Poisson distribution.
     """
-    return random.poisson(time_rng_key(seed), 
-                          lam, 
-                          shape=shape, 
-                          dtype=dtype)
+    return random.poisson(time_rng_key(seed), lam, shape=shape, dtype=dtype)
 
-def geometric(p: float, 
-              shape: Tuple[int, ...] = (), 
-              dtype: Any = jnp.int32,
-              seed=None) -> jnp.ndarray:
+
+def geometric(
+    p: float, shape: Tuple[int, ...] = (), dtype: Any = jnp.int32, seed=None
+) -> jnp.ndarray:
     """Draw samples from a geometric distribution.
 
     Args:
@@ -265,15 +250,12 @@ def geometric(p: float,
     Returns:
         jnp.ndarray: A tensor of samples from a geometric distribution.
     """
-    return random.geometric(time_rng_key(seed), 
-                            p, 
-                            shape=shape, 
-                            dtype=dtype)
+    return random.geometric(time_rng_key(seed), p, shape=shape, dtype=dtype)
 
-def gamma(a: float, 
-          shape: Tuple[int, ...] = (), 
-          dtype: Any = jnp.float32,
-          seed=None) -> jnp.ndarray:
+
+def gamma(
+    a: float, shape: Tuple[int, ...] = (), dtype: Any = jnp.float32, seed=None
+) -> jnp.ndarray:
     """Draw samples from a gamma distribution.
 
     Args:
@@ -284,15 +266,12 @@ def gamma(a: float,
     Returns:
         jnp.ndarray: A tensor of samples from a gamma distribution.
     """
-    return random.gamma(time_rng_key(seed), 
-                        a, 
-                        shape=shape, 
-                        dtype=dtype)
+    return random.gamma(time_rng_key(seed), a, shape=shape, dtype=dtype)
 
-def chisquare(df: float, 
-              shape: Tuple[int, ...] = (), 
-              dtype: Any = jnp.float32,
-              seed=None) -> jnp.ndarray:
+
+def chisquare(
+    df: float, shape: Tuple[int, ...] = (), dtype: Any = jnp.float32, seed=None
+) -> jnp.ndarray:
     """Draw samples from a chi-square distribution.
 
     Args:
@@ -303,7 +282,4 @@ def chisquare(df: float,
     Returns:
         jnp.ndarray: A tensor of samples from a chi-square distribution.
     """
-    return random.chisquare(time_rng_key(seed), 
-                            df, 
-                            shape=shape, 
-                            dtype=dtype)
+    return random.chisquare(time_rng_key(seed), df, shape=shape, dtype=dtype)

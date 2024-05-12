@@ -1,7 +1,8 @@
+import unittest
+
 import jax
 import jax.numpy as jnp
 
-import unittest
 from nanodl import *
 
 
@@ -10,8 +11,10 @@ class TestDataset(unittest.TestCase):
         class DummyDataset(Dataset):
             def __init__(self, data):
                 self.data = data
+
             def __len__(self):
                 return len(self.data)
+
             def __getitem__(self, index):
                 return self.data[index]
 
@@ -22,8 +25,10 @@ class TestDataset(unittest.TestCase):
         class DummyDataset(Dataset):
             def __init__(self, data):
                 self.data = data
+
             def __len__(self):
                 return len(self.data)
+
             def __getitem__(self, index):
                 return self.data[index]
 
@@ -31,38 +36,28 @@ class TestDataset(unittest.TestCase):
         item = dataset[5]
         self.assertEqual(item, 5)
 
+
 class TestArrayDataset(unittest.TestCase):
     def test_array_dataset_length(self):
-        dataset = ArrayDataset(
-            jnp.array([1, 2, 3]), 
-            jnp.array([4, 5, 6])
-            )
+        dataset = ArrayDataset(jnp.array([1, 2, 3]), jnp.array([4, 5, 6]))
         self.assertEqual(len(dataset), 3)
 
     def test_array_dataset_getitem(self):
-        dataset = ArrayDataset(
-            jnp.array([1, 2, 3]), 
-            jnp.array([4, 5, 6])
-            )
+        dataset = ArrayDataset(jnp.array([1, 2, 3]), jnp.array([4, 5, 6]))
         item = dataset[1]
         self.assertEqual(item, (2, 5))
 
+
 class TestDataLoader(unittest.TestCase):
     def test_data_loader_length(self):
-        dataset = ArrayDataset(
-            jnp.ones((1001, 256, 256)), 
-            jnp.ones((1001, 256, 256))
-            )
+        dataset = ArrayDataset(jnp.ones((1001, 256, 256)), jnp.ones((1001, 256, 256)))
         dataloader = DataLoader(dataset, batch_size=10, shuffle=True, drop_last=False)
         self.assertEqual(len(dataloader), 101)
 
     def test_data_loader_iteration(self):
-        dataset = ArrayDataset(
-            jnp.ones((1001, 256, 256)), 
-            jnp.ones((1001, 256, 256))
-            )
+        dataset = ArrayDataset(jnp.ones((1001, 256, 256)), jnp.ones((1001, 256, 256)))
         dataloader = DataLoader(dataset, batch_size=10, shuffle=True, drop_last=True)
-        for a,b in dataloader:
+        for a, b in dataloader:
             self.assertEqual(a.shape, (10, 256, 256))
             self.assertEqual(b.shape, (10, 256, 256))
 
@@ -79,7 +74,7 @@ class TestMLFunctions(unittest.TestCase):
         x = jnp.array([[1, 2, 3], [4, 5, 6]])
         y = jnp.array([[6, 5, 4], [2, 6, 8]])
         correlations = batch_pearsonr(x, y)
-        expected_results = jnp.array([-1.0,  1.0,  1.0])
+        expected_results = jnp.array([-1.0, 1.0, 1.0])
         self.assertTrue(jnp.allclose(correlations, expected_results))
 
     def test_classification_scores(self):
@@ -90,11 +85,13 @@ class TestMLFunctions(unittest.TestCase):
         self.assertTrue(jnp.allclose(scores, expected_results))
 
     def test_mean_reciprocal_rank(self):
-        predictions = jnp.array([
-            [0, 1, 2],  # "correct" prediction at index 0
-            [1, 0, 2],  # "correct" prediction at index 1
-            [2, 1, 0]   # "correct" prediction at index 2
-        ])
+        predictions = jnp.array(
+            [
+                [0, 1, 2],  # "correct" prediction at index 0
+                [1, 0, 2],  # "correct" prediction at index 1
+                [2, 1, 0],  # "correct" prediction at index 2
+            ]
+        )
         mrr_score = mean_reciprocal_rank(predictions)
         self.assertAlmostEqual(mrr_score, 0.61111116)
 
@@ -158,18 +155,28 @@ class TestNLPFunctions(unittest.TestCase):
 
     def test_rouge(self):
         rouge_scores = rouge(self.hypotheses, self.references, [1, 2])
-        expected_scores = {'ROUGE-1': {'precision': 0.7857142857142857,
-                            'recall': 0.9,
-                            'f1': 0.8333333333328402},
-                            'ROUGE-2': {'precision': 0.6666666666666666,
-                            'recall': 0.7,
-                            'f1': 0.6818181818176838}}
+        expected_scores = {
+            "ROUGE-1": {
+                "precision": 0.7857142857142857,
+                "recall": 0.9,
+                "f1": 0.8333333333328402,
+            },
+            "ROUGE-2": {
+                "precision": 0.6666666666666666,
+                "recall": 0.7,
+                "f1": 0.6818181818176838,
+            },
+        }
+
         def assert_nested_dicts_equal(dict1, dict2):
             for key in dict1.keys():
                 if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
                     assert_nested_dicts_equal(dict1[key], dict2[key])
                 elif dict1[key] != dict2[key]:
-                    raise AssertionError(f"Values for key '{key}' are not equal: {dict1[key]} != {dict2[key]}")
+                    raise AssertionError(
+                        f"Values for key '{key}' are not equal: {dict1[key]} != {dict2[key]}"
+                    )
+
         assert_nested_dicts_equal(rouge_scores, expected_scores)
 
     def test_bleu(self):
@@ -200,39 +207,39 @@ class TestNLPFunctions(unittest.TestCase):
 
 class TestVisionFunctions(unittest.TestCase):
     def test_normalize_images(self):
-        images = jnp.array([[[[0.0, 0.5], [1.0, 0.25]]]])  
+        images = jnp.array([[[[0.0, 0.5], [1.0, 0.25]]]])
         normalized_images = normalize_images(images)
         self.assertAlmostEqual(normalized_images.mean(), 0.0, places=3)
         self.assertAlmostEqual(normalized_images.std(), 1.0, places=3)
 
     def test_random_crop(self):
-        images = jnp.ones((10, 100, 100, 3))  
+        images = jnp.ones((10, 100, 100, 3))
         crop_size = 64
         cropped_images = random_crop(images, crop_size)
         self.assertEqual(cropped_images.shape, (10, crop_size, crop_size, 3))
 
     def test_gaussian_blur(self):
-        image = jnp.ones((5, 5, 3))  
+        image = jnp.ones((5, 5, 3))
         blurred_image = gaussian_blur(image, kernel_size=3, sigma=1.0)
         self.assertEqual(blurred_image.shape, (5, 5, 3))
 
     def test_sobel_edge_detection(self):
-        image = jnp.ones((5, 5, 3))  
+        image = jnp.ones((5, 5, 3))
         edges = sobel_edge_detection(image)
         self.assertEqual(edges.shape, (5, 5))
 
     def test_adjust_brightness(self):
-        image = jnp.ones((5, 5, 3))  
+        image = jnp.ones((5, 5, 3))
         adjusted_image = adjust_brightness(image, factor=1.5)
         self.assertEqual(adjusted_image.shape, (5, 5, 3))
 
     def test_adjust_contrast(self):
-        image = jnp.ones((5, 5, 3)) 
+        image = jnp.ones((5, 5, 3))
         adjusted_image = adjust_contrast(image, factor=1.5)
         self.assertEqual(adjusted_image.shape, (5, 5, 3))
 
     def test_flip_image(self):
-        image = jnp.ones((5, 5, 3)) 
+        image = jnp.ones((5, 5, 3))
         flipped_image_horizontally = flip_image(image, jnp.array([True]))
         flipped_image_vertically = flip_image(image, jnp.array([False]))
         self.assertEqual(flipped_image_horizontally.shape, (5, 5, 3))
@@ -240,27 +247,10 @@ class TestVisionFunctions(unittest.TestCase):
 
     def test_random_flip_image(self):
         key = jax.random.PRNGKey(0)
-        image = jnp.ones((5, 5, 3))  
+        image = jnp.ones((5, 5, 3))
         flipped_image = random_flip_image(image, key, jnp.array([True]))
         self.assertEqual(flipped_image.shape, (5, 5, 3))
 
 
-class TestTokenizerEncodingDecoding(unittest.TestCase):
-    def setUp(self):
-        """Set up the tokenizer with specific training data."""
-        text_paths = ['tests/files/sample.txt']
-        self.tokenizer = Tokenizer(training_data=text_paths,
-                                   vocab_size=100,
-                                   model_type='bpe',
-                                   max_sentence_length=50)
-
-    def test_encode_decode(self):
-        """Test that encoding followed by decoding returns the original sentence."""
-        test_sentence = "Hello, test"
-        encoded_sentence = self.tokenizer.encode(test_sentence)
-        decoded_sentence = self.tokenizer.decode(encoded_sentence)
-        self.assertEqual(test_sentence, decoded_sentence)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

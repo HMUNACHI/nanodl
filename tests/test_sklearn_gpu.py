@@ -1,7 +1,8 @@
+import unittest
+
 import jax
 import jax.numpy as jnp
 
-import unittest
 from nanodl import *
 
 
@@ -18,7 +19,9 @@ class TestNaiveBayesFunctions(unittest.TestCase):
         classifier.fit(self.X, self.y)
         predictions = classifier.predict(self.X)
         self.assertEqual(predictions.shape, (self.num_samples,))
-        self.assertTrue(jnp.all(predictions >= 0) and jnp.all(predictions < self.num_classes))
+        self.assertTrue(
+            jnp.all(predictions >= 0) and jnp.all(predictions < self.num_classes)
+        )
 
 
 class TestKClustering(unittest.TestCase):
@@ -27,9 +30,8 @@ class TestKClustering(unittest.TestCase):
         self.num_samples = 300
         self.num_features = 2
         self.X = jax.random.normal(
-            jax.random.PRNGKey(0), 
-            (self.num_samples, self.num_features)
-            )
+            jax.random.PRNGKey(0), (self.num_samples, self.num_features)
+        )
 
     def test_kmeans_fit_predict(self):
         kmeans = KMeans(k=self.k)
@@ -97,10 +99,14 @@ class TestRegression(unittest.TestCase):
         def rbf_kernel(x1, x2, length_scale=1.0):
             diff = x1[:, None] - x2
             return jnp.exp(-0.5 * jnp.sum(diff**2, axis=-1) / length_scale**2)
+
         num_samples = 100
         input_dim = 1
         X_train = jax.random.normal(jax.random.PRNGKey(0), (num_samples, input_dim))
-        y_train = jnp.sin(X_train) + jax.random.normal(jax.random.PRNGKey(0), (num_samples, 1)) * 0.1
+        y_train = (
+            jnp.sin(X_train)
+            + jax.random.normal(jax.random.PRNGKey(0), (num_samples, 1)) * 0.1
+        )
         gp = GaussianProcess(kernel=rbf_kernel, noise=1e-3)
         gp.fit(X_train, y_train)
         X_new = jax.random.normal(jax.random.PRNGKey(0), (num_samples, input_dim))
@@ -109,5 +115,5 @@ class TestRegression(unittest.TestCase):
         self.assertEqual(covariance.shape, (num_samples, num_samples))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

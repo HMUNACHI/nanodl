@@ -1,13 +1,15 @@
-import jax
 import collections
-import jax.numpy as jnp
-from typing import Iterator
 from dataclasses import dataclass
+from typing import Iterator
+
+import jax
+import jax.numpy as jnp
 
 # This script modifies the JAX DataLoader from the following repository:
 # JAX DataLoader by Birkhoff G. (https://birkhoffg.github.io/jax-dataloader/)
 # Accessed on [Date you accessed the repository, e.g., February 4, 2024]
 # This DataLoader implementation is used for efficient data loading in JAX-based machine learning projects.
+
 
 class Dataset:
     """
@@ -59,8 +61,9 @@ class ArrayDataset(Dataset):
     """
 
     def __init__(self, *arrays: jnp.array):
-        assert all(arrays[0].shape[0] == arr.shape[0] for arr in arrays), \
-            "All arrays must have the same first dimension."
+        assert all(
+            arrays[0].shape[0] == arr.shape[0] for arr in arrays
+        ), "All arrays must have the same first dimension."
         self.arrays = arrays
 
     def __len__(self):
@@ -94,7 +97,14 @@ class DataLoader:
     ```
     """
 
-    def __init__(self, dataset: Dataset, batch_size: int = 1, shuffle: bool = False, drop_last: bool = False, **kwargs):
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int = 1,
+        shuffle: bool = False,
+        drop_last: bool = False,
+        **kwargs
+    ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -102,14 +112,14 @@ class DataLoader:
 
         self.keys = PRNGSequence(seed=Config.default().global_seed)
         self.data_len = len(dataset)  # Length of the dataset
-        self.indices = jnp.arange(self.data_len) # available indices in the dataset
+        self.indices = jnp.arange(self.data_len)  # available indices in the dataset
         self.pose = 0  # record the current position in the dataset
         self._shuffle()
 
     def _shuffle(self):
         if self.shuffle:
             self.indices = jax.random.permutation(next(self.keys), self.indices)
-        
+
     def _stop_iteration(self):
         self.pose = 0
         self._shuffle()
@@ -119,17 +129,19 @@ class DataLoader:
         if self.drop_last:
             batches = len(self.dataset) // self.batch_size  # get the floor of division
         else:
-            batches = -(len(self.dataset) // -self.batch_size)  # get the ceil of division
+            batches = -(
+                len(self.dataset) // -self.batch_size
+            )  # get the ceil of division
         return batches
 
     def __next__(self):
         if self.pose + self.batch_size <= self.data_len:
-            batch_indices = self.indices[self.pose: self.pose + self.batch_size]
+            batch_indices = self.indices[self.pose : self.pose + self.batch_size]
             batch_data = self.dataset[batch_indices]
             self.pose += self.batch_size
             return batch_data
         elif self.pose < self.data_len and not self.drop_last:
-            batch_indices = self.indices[self.pose:]
+            batch_indices = self.indices[self.pose :]
             batch_data = self.dataset[batch_indices]
             self.pose += self.batch_size
             return batch_data
@@ -138,7 +150,7 @@ class DataLoader:
 
     def __iter__(self):
         return self
-    
+
 
 @dataclass
 class Config:
@@ -148,6 +160,7 @@ class Config:
     @classmethod
     def default(cls):
         return cls(rng_reserve_size=1, global_seed=42)
+
 
 class PRNGSequence(Iterator[jax.random.PRNGKey]):
     """
@@ -175,7 +188,7 @@ class PRNGSequence(Iterator[jax.random.PRNGKey]):
             new_keys = tuple(jax.random.split(self._key, num + 1))
             self._key = new_keys[0]
             self._subkeys.extend(new_keys[1:])
-            
+
     def __next__(self):
         if not self._subkeys:
             self.reserve(Config.default().rng_reserve_size)

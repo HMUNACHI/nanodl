@@ -1,18 +1,36 @@
 import unittest
+
 import jax.numpy as jnp
+
 from nanodl import (
-    time_rng_key, uniform, normal, bernoulli, categorical, randint,
-    permutation, gumbel, choice, bits, exponential,
-    triangular, truncated_normal, poisson, geometric, gamma,
-    chisquare
+    bernoulli,
+    bits,
+    categorical,
+    chisquare,
+    choice,
+    exponential,
+    gamma,
+    geometric,
+    gumbel,
+    normal,
+    permutation,
+    poisson,
+    randint,
+    time_rng_key,
+    triangular,
+    truncated_normal,
+    uniform,
 )
+
 
 class TestRandomFunctions(unittest.TestCase):
 
     def test_time_rng_key(self):
         key1 = time_rng_key(seed=42)
         key2 = time_rng_key(seed=42)
-        self.assertTrue(jnp.array_equal(key1, key2), "Keys should be equal for the same seed")
+        self.assertTrue(
+            jnp.array_equal(key1, key2), "Keys should be equal for the same seed"
+        )
 
     def test_uniform(self):
         result = uniform((2, 3))
@@ -94,5 +112,6 @@ class TestRandomFunctions(unittest.TestCase):
         self.assertEqual(result.shape, (2, 2))
         self.assertEqual(result.dtype, jnp.float32)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

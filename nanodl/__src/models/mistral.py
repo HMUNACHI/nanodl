@@ -1,14 +1,15 @@
-import jax
-import flax
 import time
-import optax
-import jax.numpy as jnp
+from typing import Any, Iterable, Optional, Tuple
+
+import flax
 import flax.linen as nn
+import jax
+import jax.numpy as jnp
+import optax
 from flax.training import train_state
-from typing import Tuple, Any, Optional, Iterable
 
 
-class RotaryPositionalEncoding():
+class RotaryPositionalEncoding:
     """
     Implements rotary positional encoding (RoPE) for transformers, enhancing their ability to capture sequence order.
 
@@ -23,10 +24,13 @@ class RotaryPositionalEncoding():
         apply_rotary_pos_emb(x, cos, sin): Applies the rotary positional encoding to the input embeddings.
         __call__(q, k): Applies rotary positional encoding to query and key tensors in attention mechanisms.
     """
+
     def __init__(self, dim_model: int):
         super().__init__()
         self.dim_model = dim_model
-        inv_freq = 1.0 / (10000 ** (jnp.arange(0, dim_model, 2, dtype=jnp.float32) / dim_model))
+        inv_freq = 1.0 / (
+            10000 ** (jnp.arange(0, dim_model, 2, dtype=jnp.float32) / dim_model)
+        )
         self.inv_freq = inv_freq
         self._seq_len_cached = None
         self._cos_cached = None
@@ -55,12 +59,14 @@ class RotaryPositionalEncoding():
         return (x * cos) + (self.rotate_half(x) * sin)
 
     def __call__(self, q, k):
-        self._cos_cached, self._sin_cached = self._update_cos_sin_tables(k, seq_dimension=-2)
+        self._cos_cached, self._sin_cached = self._update_cos_sin_tables(
+            k, seq_dimension=-2
+        )
         return (
             self.apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached)[0],
             self.apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached)[0],
         )
-    
+
 
 class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
     """
@@ -83,64 +89,72 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
         attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors within each window.
         causal_mask(shape): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism within windows.
     """
-    hidden_dim : int  # Output dimension
-    num_heads : int  # Number of parallel heads
-    num_groups : int  # Number of groups to split the heads into
+
+    hidden_dim: int  # Output dimension
+    num_heads: int  # Number of parallel heads
+    num_groups: int  # Number of groups to split the heads into
     window_size: int
     shift_size: int
 
     def setup(self):
-        self.query_projection = nn.Dense(self.hidden_dim // self.num_heads,
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros,
-                                )
-        self.key_projection = nn.Dense(self.hidden_dim // (self.num_heads * self.num_groups),
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
-        self.value_projection = nn.Dense(self.hidden_dim // (self.num_heads * self.num_groups),
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
+        self.query_projection = nn.Dense(
+            self.hidden_dim // self.num_heads,
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
+        self.key_projection = nn.Dense(
+            self.hidden_dim // (self.num_heads * self.num_groups),
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
+        self.value_projection = nn.Dense(
+            self.hidden_dim // (self.num_heads * self.num_groups),
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
         self.rope = RotaryPositionalEncoding(self.hidden_dim // self.num_groups)
-        self.output = nn.Dense(self.hidden_dim,
-                               kernel_init=nn.initializers.xavier_uniform(),
-                               bias_init=nn.initializers.zeros)
+        self.output = nn.Dense(
+            self.hidden_dim,
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
 
-    def __call__(self, 
-                 inputs: jnp.ndarray, 
-                 context: jnp.ndarray, 
-                 mask: jnp.ndarray) -> tuple:
+    def __call__(
+        self, inputs: jnp.ndarray, context: jnp.ndarray, mask: jnp.ndarray
+    ) -> tuple:
 
         query = self.query_projection(inputs)
         key = self.key_projection(context)
         value = self.value_projection(context)
-        
+
         # Break query into groups and transpose to (num_groups, batch_size, seq_len, dims)
         # This will allow vmapping over the groups for parallelization
-        grouped_query = jnp.reshape(query, (query.shape[0], query.shape[1], self.num_groups, -1))
+        grouped_query = jnp.reshape(
+            query, (query.shape[0], query.shape[1], self.num_groups, -1)
+        )
         grouped_query = jnp.repeat(grouped_query, self.num_heads, axis=-1)
         grouped_query = jnp.transpose(grouped_query, (2, 0, 1, 3))
 
         # Repeat the key and values
         key = jnp.repeat(key, self.num_heads, axis=-1)
         value = jnp.repeat(value, self.num_heads, axis=-1)
-        vectorized_process_group = jax.vmap(self.process_group, in_axes=(0, None, None, None))
+        vectorized_process_group = jax.vmap(
+            self.process_group, in_axes=(0, None, None, None)
+        )
         results = vectorized_process_group(grouped_query, key, value, mask)
 
         # Merge the groups back together
         context_vectors = jnp.concatenate(results[0], axis=-1)
         return self.output(context_vectors), results[1]
-    
+
     def process_group(self, query, key, value, mask):
         query, key = self.rope(query, key)
         query_windows = self.window_partition(query)
         key_windows = self.window_partition(key)
         value_windows = self.window_partition(value)
-        attention_windows, attention_maps = self.attention_function(query_windows, 
-                                                                    key_windows, 
-                                                                    value_windows,
-                                                                    mask)
+        attention_windows, attention_maps = self.attention_function(
+            query_windows, key_windows, value_windows, mask
+        )
 
         attention_windows = jnp.roll(attention_windows, -self.shift_size, axis=1)
         merged = attention_windows.transpose((1, 0, 2, 3))
@@ -148,9 +162,15 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
 
     def window_partition(self, x):
         B, N, C = x.shape
-        assert N % self.window_size == 0, "Sequence length must be a multiple of the window size"
-        windows = jnp.reshape(x, (B, -1, self.window_size, C))  # (batch_size, num_windows, window_size, dim)
-        windows = windows.transpose((1, 0, 2, 3))  # Transpose to (num_windows, batch_size, window_size, dim)
+        assert (
+            N % self.window_size == 0
+        ), "Sequence length must be a multiple of the window size"
+        windows = jnp.reshape(
+            x, (B, -1, self.window_size, C)
+        )  # (batch_size, num_windows, window_size, dim)
+        windows = windows.transpose(
+            (1, 0, 2, 3)
+        )  # Transpose to (num_windows, batch_size, window_size, dim)
         return windows
 
     def attention_function(self, query, key, value, mask):
@@ -160,11 +180,21 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
         dim_key = key.shape[-1]
 
         # Split keys, and values into heads
-        query_heads = jnp.reshape(query, (query.shape[0], query.shape[1], self.num_heads, input_length, head_dim))
-        key_heads = jnp.reshape(key, (key.shape[0], key.shape[1], self.num_heads, context_length, head_dim))
-        value_heads = jnp.reshape(value, (value.shape[0], value.shape[1], self.num_heads, context_length, head_dim))
+        query_heads = jnp.reshape(
+            query,
+            (query.shape[0], query.shape[1], self.num_heads, input_length, head_dim),
+        )
+        key_heads = jnp.reshape(
+            key, (key.shape[0], key.shape[1], self.num_heads, context_length, head_dim)
+        )
+        value_heads = jnp.reshape(
+            value,
+            (value.shape[0], value.shape[1], self.num_heads, context_length, head_dim),
+        )
 
-        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 2, 4, 3)) / jnp.sqrt(dim_key)
+        attention_scores = jnp.matmul(
+            query_heads, key_heads.transpose(0, 1, 2, 4, 3)
+        ) / jnp.sqrt(dim_key)
 
         if mask is not None:
             mask = self.causal_mask(attention_scores.shape)
@@ -173,23 +203,27 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
         attention_weights = jax.nn.softmax(attention_scores, axis=-1)
         attended_values = jnp.matmul(attention_weights, value_heads)
         attended_values = attended_values.transpose(0, 1, 3, 2, 4)
-        attended_values = jnp.reshape(attended_values, (query.shape[0], query.shape[1], input_length, query.shape[-1]))
+        attended_values = jnp.reshape(
+            attended_values,
+            (query.shape[0], query.shape[1], input_length, query.shape[-1]),
+        )
         return attended_values, attention_weights
-    
-    def causal_mask(self, 
-                shape: Tuple[int, ...]) -> jnp.ndarray:
-        
+
+    def causal_mask(self, shape: Tuple[int, ...]) -> jnp.ndarray:
+
         # Create index tensors for the source and destination dimensions
         source_dim, destination_dim = shape[-2], shape[-2]
         idx_source = jnp.arange(destination_dim)[:, None]
         idx_destination = jnp.arange(source_dim)
         mask = idx_source >= idx_destination - source_dim + destination_dim
-        mask = mask.astype(jnp.int32) 
+        mask = mask.astype(jnp.int32)
 
         # Expand dimensions to match the required output shape
         mask = mask[None, None, None, :, :]
-        return jnp.broadcast_to(mask, (shape[0], shape[1], shape[2], destination_dim, source_dim))
-    
+        return jnp.broadcast_to(
+            mask, (shape[0], shape[1], shape[2], destination_dim, source_dim)
+        )
+
 
 class PositionWiseFFN(nn.Module):
     """
@@ -205,18 +239,23 @@ class PositionWiseFFN(nn.Module):
         setup(): Initializes the two linear layers.
         __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
+
     hidden_dim: int
     dim: int
 
     def setup(self):
-        self.dense1 = nn.Dense(self.hidden_dim, kernel_init=nn.initializers.xavier_uniform())
+        self.dense1 = nn.Dense(
+            self.hidden_dim, kernel_init=nn.initializers.xavier_uniform()
+        )
         self.dense2 = nn.Dense(self.dim, kernel_init=nn.initializers.xavier_uniform())
-        self.dense3 = nn.Dense(self.hidden_dim, kernel_init=nn.initializers.xavier_uniform())
+        self.dense3 = nn.Dense(
+            self.hidden_dim, kernel_init=nn.initializers.xavier_uniform()
+        )
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
         return self.dense2(nn.silu(self.dense1(X) * self.dense3(X)))
-    
-    
+
+
 class MistralDecoderBlock(nn.Module):
     """
     Implements a decoder block for the Mistral model, incorporating grouped rotary shifted window multi-head attention.
@@ -236,6 +275,7 @@ class MistralDecoderBlock(nn.Module):
         setup(): Initializes the components of the Mistral decoder block.
         __call__(x, training): Processes the input tensor through the Mistral decoder block.
     """
+
     hidden_dim: int
     num_heads: int
     feedforward_dim: int
@@ -245,18 +285,22 @@ class MistralDecoderBlock(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
-                                                          num_heads=self.num_heads,
-                                                          num_groups=self.num_groups,
-                                                          window_size=self.window_size,
-                                                          shift_size=self.shift_size)
-        
-        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
-                                                          num_heads=self.num_heads,
-                                                          num_groups=self.num_groups,
-                                                          window_size=self.window_size,
-                                                          shift_size=self.shift_size)
-        
+        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(
+            hidden_dim=self.hidden_dim,
+            num_heads=self.num_heads,
+            num_groups=self.num_groups,
+            window_size=self.window_size,
+            shift_size=self.shift_size,
+        )
+
+        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(
+            hidden_dim=self.hidden_dim,
+            num_heads=self.num_heads,
+            num_groups=self.num_groups,
+            window_size=self.window_size,
+            shift_size=self.shift_size,
+        )
+
         self.feed_forward = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
         self.norm1 = nn.RMSNorm()
         self.norm2 = nn.RMSNorm()
@@ -265,10 +309,8 @@ class MistralDecoderBlock(nn.Module):
         self.dropout2 = nn.Dropout(self.dropout)
         self.dropout3 = nn.Dropout(self.dropout)
 
-    def __call__(self, 
-                x: jnp.ndarray,
-                training: bool = False) -> tuple:
-        
+    def __call__(self, x: jnp.ndarray, training: bool = False) -> tuple:
+
         x = self.norm1(x)
         attended_x, attention1 = self.attention1(x, x, mask=True)
         x = self.dropout1(x, deterministic=not training)
@@ -309,6 +351,7 @@ class MistralDecoder(nn.Module):
         setup(): Initializes the components of the Mistral decoder.
         __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral decoder.
     """
+
     num_layers: int
     hidden_dim: int
     num_heads: int
@@ -321,25 +364,29 @@ class MistralDecoder(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
-                                  features=self.embed_dim)
-        
-        self.layers = [MistralDecoderBlock(self.hidden_dim, 
-                                    self.num_heads, 
-                                    self.feedforward_dim, 
-                                    self.dropout,
-                                    self.num_groups,
-                                    self.window_size,
-                                    self.shift_size) for _ in range(self.num_layers)]
-        
-        self.outputs = nn.Dense(self.vocab_size)
-        
+        self.embedding = nn.Embed(
+            num_embeddings=self.vocab_size, features=self.embed_dim
+        )
 
-    def __call__(self, 
-                 x: jnp.ndarray,
-                 training: bool = False,
-                 drop_last_layer: bool = False) -> tuple:
-        
+        self.layers = [
+            MistralDecoderBlock(
+                self.hidden_dim,
+                self.num_heads,
+                self.feedforward_dim,
+                self.dropout,
+                self.num_groups,
+                self.window_size,
+                self.shift_size,
+            )
+            for _ in range(self.num_layers)
+        ]
+
+        self.outputs = nn.Dense(self.vocab_size)
+
+    def __call__(
+        self, x: jnp.ndarray, training: bool = False, drop_last_layer: bool = False
+    ) -> tuple:
+
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -352,7 +399,6 @@ class MistralDecoder(nn.Module):
             x = self.outputs(x)
 
         return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
-    
 
 
 class Mistral(nn.Module):
@@ -381,13 +427,13 @@ class Mistral(nn.Module):
         __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
-    
-        Mistral 7B is a large language model (LLM) designed for enhanced efficiency and performance. It utilizes Grouped-Query Attention (GQA) to achieve quicker inference times. 
-    It incorporates Sliding Window Attention (SWA), enabling it to efficiently process sequences of any length while minimizing the cost of inference. 
+
+        Mistral 7B is a large language model (LLM) designed for enhanced efficiency and performance. It utilizes Grouped-Query Attention (GQA) to achieve quicker inference times.
+    It incorporates Sliding Window Attention (SWA), enabling it to efficiently process sequences of any length while minimizing the cost of inference.
     Additionally, the ReLU non-linearity is replaced with the SwiGLU activation function, which is a variant of the GLU activation function.
     Absolute positional embeddings are replaced with rotary positional embeddings (RoPE), implemented at each layer of the network. For specific hyper-parameter details, refer to Table 2 in the document.
 
-    Mixtral is an architectural upgrade within Mistral. Leverages "Sparse Mixture-of-Experts" (MoE). Each layer has 8 expert groups, 
+    Mixtral is an architectural upgrade within Mistral. Leverages "Sparse Mixture-of-Experts" (MoE). Each layer has 8 expert groups,
     but a "router network" selects only 2 relevant ones per token, reducing active calculations and boosting efficiency.
 
     Example usage:
@@ -410,9 +456,9 @@ class Mistral(nn.Module):
 
         # Create dataset and dataloader
         dataset = ArrayDataset(dummy_inputs, dummy_targets)
-        dataloader = DataLoader(dataset, 
-                                batch_size=batch_size, 
-                                shuffle=True, 
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
                                 drop_last=False)
 
         # How to loop through dataloader
@@ -445,15 +491,15 @@ class Mistral(nn.Module):
         params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
 
         # Call as you would a Jax/Flax model
-        outputs = model.apply({'params': params}, 
-                            dummy_inputs, 
+        outputs = model.apply({'params': params},
+                            dummy_inputs,
                             rngs={'dropout': dropout_rng})
         print(outputs.shape)
 
         # Training on data
         trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-        trainer.train(train_loader=dataloader, 
-                    num_epochs=2, 
+        trainer.train(train_loader=dataloader,
+                    num_epochs=2,
                     val_loader=dataloader)
 
         print(trainer.evaluate(dataloader))
@@ -461,15 +507,16 @@ class Mistral(nn.Module):
         # Generating from a start token
         start_tokens = jnp.array([[123, 456]])
 
-        # Remember to load the trained parameters 
+        # Remember to load the trained parameters
         params = trainer.load_params('params.pkl')
         outputs = model.apply({'params': params},
                             start_tokens,
-                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            rngs={'dropout': jax.random.PRNGKey(2)},
                             method=model.generate)
         print(outputs)
         ```
     """
+
     num_layers: int
     num_heads: int
     num_groups: int
@@ -485,29 +532,28 @@ class Mistral(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.decoder = MistralDecoder(self.num_layers,
-                                self.hidden_dim,
-                                self.num_heads,
-                                self.num_groups,
-                                self.feedforward_dim,
-                                self.dropout,
-                                self.vocab_size,
-                                self.embed_dim,
-                                self.window_size,
-                                self.shift_size)
-        
-    def __call__(self, 
-                 x: jnp.ndarray,
-                 training: bool = False,
-                 drop_last_layer: bool = False) -> jnp.ndarray:
-        
-        return self.decoder(x=x, 
-                            training=training,
-                            drop_last_layer=drop_last_layer)[0]
-    
+        self.decoder = MistralDecoder(
+            self.num_layers,
+            self.hidden_dim,
+            self.num_heads,
+            self.num_groups,
+            self.feedforward_dim,
+            self.dropout,
+            self.vocab_size,
+            self.embed_dim,
+            self.window_size,
+            self.shift_size,
+        )
+
+    def __call__(
+        self, x: jnp.ndarray, training: bool = False, drop_last_layer: bool = False
+    ) -> jnp.ndarray:
+
+        return self.decoder(x=x, training=training, drop_last_layer=drop_last_layer)[0]
+
     def zero_pad(self, arr, max_length):
-        current_length = arr.shape[1] 
-        num_zeros = max_length - current_length 
+        current_length = arr.shape[1]
+        num_zeros = max_length - current_length
 
         if num_zeros > 0:
             zeros = jnp.zeros((arr.shape[0], num_zeros), dtype=arr.dtype)
@@ -516,13 +562,14 @@ class Mistral(nn.Module):
             padded_array = arr
 
         return padded_array
-    
 
-    def generate(self, 
-                 x: Optional[jnp.ndarray] = None,
-                 temperature: float = 1.0,
-                 deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        
+    def generate(
+        self,
+        x: Optional[jnp.ndarray] = None,
+        temperature: float = 1.0,
+        deterministic: bool = False,
+    ) -> Tuple[jnp.ndarray]:
+
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
 
@@ -531,7 +578,9 @@ class Mistral(nn.Module):
 
         # Autoregressive decoding loop
         for _ in range(self.max_length - 1):
-            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+            decoder_output = self.decoder(
+                self.zero_pad(decoder_input, self.max_length), training=False
+            )[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -539,29 +588,40 @@ class Mistral(nn.Module):
             if deterministic:
                 next_token = jnp.argmax(next_token_probabilities, axis=-1)
             else:
-                next_token = jax.random.categorical(jax.random.PRNGKey(int(time.time())), next_token_probabilities, axis=-1)
+                next_token = jax.random.categorical(
+                    jax.random.PRNGKey(int(time.time())),
+                    next_token_probabilities,
+                    axis=-1,
+                )
 
             next_token = next_token[0]
             output_sequence.append(next_token.item())
-            decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
+            decoder_input = jnp.concatenate(
+                [decoder_input, jnp.array([[next_token]])], axis=1
+            )
 
             if next_token.item() == self.end_token:
                 break
 
         return jnp.array(output_sequence)
-    
 
-    def generate_batch(self, 
-                 x: Optional[jnp.ndarray] = None,
-                 temperature: float = 1.0,
-                 deterministic: bool = False) -> jnp.ndarray:
+    def generate_batch(
+        self,
+        x: Optional[jnp.ndarray] = None,
+        temperature: float = 1.0,
+        deterministic: bool = False,
+    ) -> jnp.ndarray:
 
         batch_size = x.shape[0] if x is not None else 1
-        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        decoder_input = (
+            x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        )
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
-        for i in range(self.max_length-1):
-            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+        for i in range(self.max_length - 1):
+            decoder_output = self.decoder(
+                self.zero_pad(decoder_input, self.max_length), training=False
+            )[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -570,10 +630,14 @@ class Mistral(nn.Module):
                 next_token = jnp.argmax(next_token_probabilities, axis=-1)
             else:
                 key = jax.random.PRNGKey(int(time.time()))
-                next_token = jax.random.categorical(key, next_token_probabilities, axis=-1)
+                next_token = jax.random.categorical(
+                    key, next_token_probabilities, axis=-1
+                )
 
             output_sequences = output_sequences.at[:, i].set(next_token)
-            decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
+            decoder_input = jnp.concatenate(
+                [decoder_input, next_token[:, None]], axis=1
+            )
 
             if jnp.all(next_token == self.end_token):
                 break
@@ -616,34 +680,40 @@ class SparseMixtureOfExperts(nn.Module):
                 tensor has the same batch and sequence length dimensions as the input tensor,
                 but the last dimension is equal to num_outputs.
     """
+
     num_hiddens: int
     num_outputs: int
     num_experts: int = 8
     top_k: int = 2  # Number of top experts to use
 
     def setup(self):
-        self.experts = [PositionWiseFFN(self.num_hiddens, 
-                                        self.num_outputs) for _ in range(self.num_experts)
-                                ]
-        self.gate = nn.Dense(self.num_experts, 
-                            kernel_init=nn.initializers.xavier_uniform()
-                            )
-        self.dense_final = nn.Dense(self.num_outputs, 
-                                    kernel_init=nn.initializers.xavier_uniform()
-                                    )
+        self.experts = [
+            PositionWiseFFN(self.num_hiddens, self.num_outputs)
+            for _ in range(self.num_experts)
+        ]
+        self.gate = nn.Dense(
+            self.num_experts, kernel_init=nn.initializers.xavier_uniform()
+        )
+        self.dense_final = nn.Dense(
+            self.num_outputs, kernel_init=nn.initializers.xavier_uniform()
+        )
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
         gating_weights = nn.softmax(self.gate(X), axis=-1)
-        top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k:]
+        top_k_indices = jnp.argsort(gating_weights, axis=-1)[..., -self.top_k :]
         expert_outputs = jnp.stack([expert(X) for expert in self.experts], axis=2)
         batch_size, seq_length, _ = X.shape
         batch_indices = jnp.arange(batch_size)[:, None, None]
         seq_indices = jnp.arange(seq_length)[None, :, None]
         top_k_expert_outputs = expert_outputs[batch_indices, seq_indices, top_k_indices]
-        top_k_gating_weights = jnp.take_along_axis(gating_weights, top_k_indices, axis=-1)
-        mixed_expert_output = jnp.sum(top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2)
+        top_k_gating_weights = jnp.take_along_axis(
+            gating_weights, top_k_indices, axis=-1
+        )
+        mixed_expert_output = jnp.sum(
+            top_k_gating_weights[..., None] * top_k_expert_outputs, axis=2
+        )
         return self.dense_final(mixed_expert_output)
-    
+
 
 class MixtralDecoderBlock(nn.Module):
     """
@@ -664,6 +734,7 @@ class MixtralDecoderBlock(nn.Module):
         setup(): Initializes the components of the Mixtral decoder block.
         __call__(x, training): Processes the input tensor through the Mixtral decoder block.
     """
+
     hidden_dim: int
     num_heads: int
     feedforward_dim: int
@@ -673,19 +744,25 @@ class MixtralDecoderBlock(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
-                                                          num_heads=self.num_heads,
-                                                          num_groups=self.num_groups,
-                                                          window_size=self.window_size,
-                                                          shift_size=self.shift_size)
-        
-        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(hidden_dim=self.hidden_dim, 
-                                                          num_heads=self.num_heads,
-                                                          num_groups=self.num_groups,
-                                                          window_size=self.window_size,
-                                                          shift_size=self.shift_size)
-        
-        self.feed_forward = SparseMixtureOfExperts(self.feedforward_dim, self.hidden_dim)
+        self.attention1 = GroupedRotaryShiftedWindowMultiHeadAttention(
+            hidden_dim=self.hidden_dim,
+            num_heads=self.num_heads,
+            num_groups=self.num_groups,
+            window_size=self.window_size,
+            shift_size=self.shift_size,
+        )
+
+        self.attention2 = GroupedRotaryShiftedWindowMultiHeadAttention(
+            hidden_dim=self.hidden_dim,
+            num_heads=self.num_heads,
+            num_groups=self.num_groups,
+            window_size=self.window_size,
+            shift_size=self.shift_size,
+        )
+
+        self.feed_forward = SparseMixtureOfExperts(
+            self.feedforward_dim, self.hidden_dim
+        )
         self.norm1 = nn.RMSNorm()
         self.norm2 = nn.RMSNorm()
         self.norm3 = nn.RMSNorm()
@@ -693,10 +770,8 @@ class MixtralDecoderBlock(nn.Module):
         self.dropout2 = nn.Dropout(self.dropout)
         self.dropout3 = nn.Dropout(self.dropout)
 
-    def __call__(self, 
-                x: jnp.ndarray,
-                training: bool = False) -> tuple:
-        
+    def __call__(self, x: jnp.ndarray, training: bool = False) -> tuple:
+
         x = self.norm1(x)
         attended_x, attention1 = self.attention1(x, x, mask=True)
         x = self.dropout1(x, deterministic=not training)
@@ -714,7 +789,7 @@ class MixtralDecoderBlock(nn.Module):
 
         return x, jnp.array(attention1), jnp.array(attention2)
 
-    
+
 class MixtralDecoder(nn.Module):
     """
     Implements the decoder component of the Mixtral model.
@@ -737,6 +812,7 @@ class MixtralDecoder(nn.Module):
         setup(): Initializes the components of the Mixtral decoder.
         __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral decoder.
     """
+
     num_layers: int
     hidden_dim: int
     num_heads: int
@@ -749,25 +825,29 @@ class MixtralDecoder(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.embedding = nn.Embed(num_embeddings=self.vocab_size, 
-                                  features=self.embed_dim)
-        
-        self.layers = [MixtralDecoderBlock(self.hidden_dim, 
-                                    self.num_heads, 
-                                    self.feedforward_dim, 
-                                    self.dropout,
-                                    self.num_groups,
-                                    self.window_size,
-                                    self.shift_size) for _ in range(self.num_layers)]
-        
-        self.outputs = nn.Dense(self.vocab_size)
-        
+        self.embedding = nn.Embed(
+            num_embeddings=self.vocab_size, features=self.embed_dim
+        )
 
-    def __call__(self, 
-                 x: jnp.ndarray,
-                 training: bool = False,
-                 drop_last_layer: bool = False) -> tuple:
-        
+        self.layers = [
+            MixtralDecoderBlock(
+                self.hidden_dim,
+                self.num_heads,
+                self.feedforward_dim,
+                self.dropout,
+                self.num_groups,
+                self.window_size,
+                self.shift_size,
+            )
+            for _ in range(self.num_layers)
+        ]
+
+        self.outputs = nn.Dense(self.vocab_size)
+
+    def __call__(
+        self, x: jnp.ndarray, training: bool = False, drop_last_layer: bool = False
+    ) -> tuple:
+
         attention_maps = []
         x = self.embedding(x)
         cross_attention_maps = []
@@ -780,7 +860,6 @@ class MixtralDecoder(nn.Module):
             x = self.outputs(x)
 
         return x, jnp.array(attention_maps), jnp.array(cross_attention_maps)
-    
 
 
 class Mixtral(nn.Module):
@@ -809,7 +888,7 @@ class Mixtral(nn.Module):
         __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
-    
+
     Example usage:
         ```
         import jax
@@ -830,9 +909,9 @@ class Mixtral(nn.Module):
 
         # Create dataset and dataloader
         dataset = ArrayDataset(dummy_inputs, dummy_targets)
-        dataloader = DataLoader(dataset, 
-                                batch_size=batch_size, 
-                                shuffle=True, 
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
                                 drop_last=False)
 
         # How to loop through dataloader
@@ -865,15 +944,15 @@ class Mixtral(nn.Module):
         params = model.init({'params': rngs, 'dropout': dropout_rng}, dummy_inputs)['params']
 
         # Call as you would a Jax/Flax model
-        outputs = model.apply({'params': params}, 
-                            dummy_inputs, 
+        outputs = model.apply({'params': params},
+                            dummy_inputs,
                             rngs={'dropout': dropout_rng})
         print(outputs.shape)
 
         # Training on data
         trainer = MistralDataParallelTrainer(model, dummy_inputs.shape, 'params.pkl')
-        trainer.train(train_loader=dataloader, 
-                    num_epochs=2, 
+        trainer.train(train_loader=dataloader,
+                    num_epochs=2,
                     val_loader=dataloader)
 
         print(trainer.evaluate(dataloader))
@@ -881,15 +960,16 @@ class Mixtral(nn.Module):
         # Generating from a start token
         start_tokens = jnp.array([[123, 456]])
 
-        # Remember to load the trained parameters 
+        # Remember to load the trained parameters
         params = trainer.load_params('params.pkl')
         outputs = model.apply({'params': params},
                             start_tokens,
-                            rngs={'dropout': jax.random.PRNGKey(2)}, 
+                            rngs={'dropout': jax.random.PRNGKey(2)},
                             method=model.generate)
         print(outputs)
         ```
     """
+
     num_layers: int
     num_heads: int
     num_groups: int
@@ -905,26 +985,25 @@ class Mixtral(nn.Module):
     shift_size: int
 
     def setup(self):
-        self.decoder = MixtralDecoder(self.num_layers,
-                                self.hidden_dim,
-                                self.num_heads,
-                                self.num_groups,
-                                self.feedforward_dim,
-                                self.dropout,
-                                self.vocab_size,
-                                self.embed_dim,
-                                self.window_size,
-                                self.shift_size)
-        
-    def __call__(self, 
-                 x: jnp.ndarray,
-                 training: bool = False,
-                 drop_last_layer: bool = False) -> jnp.ndarray:
-        
-        return self.decoder(x=x, 
-                            training=training,
-                            drop_last_layer=drop_last_layer)[0]
-    
+        self.decoder = MixtralDecoder(
+            self.num_layers,
+            self.hidden_dim,
+            self.num_heads,
+            self.num_groups,
+            self.feedforward_dim,
+            self.dropout,
+            self.vocab_size,
+            self.embed_dim,
+            self.window_size,
+            self.shift_size,
+        )
+
+    def __call__(
+        self, x: jnp.ndarray, training: bool = False, drop_last_layer: bool = False
+    ) -> jnp.ndarray:
+
+        return self.decoder(x=x, training=training, drop_last_layer=drop_last_layer)[0]
+
     def zero_pad(self, arr, max_length):
         current_length = arr.shape[1]
         num_zeros = max_length - current_length
@@ -936,13 +1015,14 @@ class Mixtral(nn.Module):
             padded_array = arr
 
         return padded_array
-    
 
-    def generate(self, 
-                 x: Optional[jnp.ndarray] = None,
-                 temperature: float = 1.0,
-                 deterministic: bool = False) -> Tuple[jnp.ndarray]:
-        
+    def generate(
+        self,
+        x: Optional[jnp.ndarray] = None,
+        temperature: float = 1.0,
+        deterministic: bool = False,
+    ) -> Tuple[jnp.ndarray]:
+
         if x is not None:
             assert x.shape[0] == 1, "Batch size must be 1, else use generate_batch()"
 
@@ -950,8 +1030,10 @@ class Mixtral(nn.Module):
         output_sequence = []
 
         # Autoregressive decoding loop
-        for _ in range(self.max_length-1):
-            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+        for _ in range(self.max_length - 1):
+            decoder_output = self.decoder(
+                self.zero_pad(decoder_input, self.max_length), training=False
+            )[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -959,29 +1041,43 @@ class Mixtral(nn.Module):
             if deterministic:
                 next_token = jnp.argmax(next_token_probabilities, axis=-1)
             else:
-                next_token = jax.random.categorical(jax.random.PRNGKey(int(time.time())), next_token_probabilities, axis=-1)
+                next_token = jax.random.categorical(
+                    jax.random.PRNGKey(int(time.time())),
+                    next_token_probabilities,
+                    axis=-1,
+                )
 
             next_token = next_token[0]
             output_sequence.append(next_token.item())
-            decoder_input = jnp.concatenate([decoder_input, jnp.array([[next_token]])], axis=1)
+            decoder_input = jnp.concatenate(
+                [decoder_input, jnp.array([[next_token]])], axis=1
+            )
 
-            if next_token.item() == self.end_token or len(output_sequence) == self.max_length:
+            if (
+                next_token.item() == self.end_token
+                or len(output_sequence) == self.max_length
+            ):
                 break
 
         return jnp.array(output_sequence)
-    
 
-    def generate_batch(self, 
-                 x: Optional[jnp.ndarray] = None,
-                 temperature: float = 1.0,
-                 deterministic: bool = False) -> jnp.ndarray:
-        
+    def generate_batch(
+        self,
+        x: Optional[jnp.ndarray] = None,
+        temperature: float = 1.0,
+        deterministic: bool = False,
+    ) -> jnp.ndarray:
+
         batch_size = x.shape[0] if x is not None else 1
-        decoder_input = x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        decoder_input = (
+            x if x is not None else jnp.full((batch_size, 1), self.start_token)
+        )
         output_sequences = jnp.zeros((batch_size, self.max_length), dtype=jnp.int32)
 
-        for i in range(self.max_length-1):
-            decoder_output = self.decoder(self.zero_pad(decoder_input, self.max_length), training=False)[0]
+        for i in range(self.max_length - 1):
+            decoder_output = self.decoder(
+                self.zero_pad(decoder_input, self.max_length), training=False
+            )[0]
             last_token_logits = decoder_output[:, -1, :]
             scaled_logits = last_token_logits / temperature
             next_token_probabilities = jax.nn.softmax(scaled_logits, axis=-1)
@@ -990,21 +1086,28 @@ class Mixtral(nn.Module):
                 next_token = jnp.argmax(next_token_probabilities, axis=-1)
             else:
                 key = jax.random.PRNGKey(int(time.time()))
-                next_token = jax.random.categorical(key, next_token_probabilities, axis=-1)
+                next_token = jax.random.categorical(
+                    key, next_token_probabilities, axis=-1
+                )
 
             output_sequences = output_sequences.at[:, i].set(next_token)
-            decoder_input = jnp.concatenate([decoder_input, next_token[:, None]], axis=1)
+            decoder_input = jnp.concatenate(
+                [decoder_input, next_token[:, None]], axis=1
+            )
 
-            if jnp.all(next_token == self.end_token) or len(output_sequences) == self.max_length:
+            if (
+                jnp.all(next_token == self.end_token)
+                or len(output_sequences) == self.max_length
+            ):
                 break
 
         return output_sequences
-    
-    
+
+
 class MistralDataParallelTrainer:
     """
     Trainer class using data parallelism with JAX.
-    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs).
     It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
@@ -1023,12 +1126,15 @@ class MistralDataParallelTrainer:
         save_params(): Saves the model parameters to a file.
         load_params(filename): Loads model parameters from a file.
     """
-    def __init__(self, 
-                 model: Any, 
-                 input_shape: Tuple[int, ...],
-                 weights_filename: str,
-                 learning_rate: float = 1e-5,
-                 params_path: Optional[str] = None) -> None:
+
+    def __init__(
+        self,
+        model: Any,
+        input_shape: Tuple[int, ...],
+        weights_filename: str,
+        learning_rate: float = 1e-5,
+        params_path: Optional[str] = None,
+    ) -> None:
         self.model = model
         self.params = None
         self.params_path = params_path
@@ -1036,51 +1142,61 @@ class MistralDataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(MistralDataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(MistralDataParallelTrainer.evaluation_step, axis_name='devices')
+        self.train_step = jax.pmap(
+            MistralDataParallelTrainer.train_step, axis_name="devices"
+        )
+        self.evaluation_step = jax.pmap(
+            MistralDataParallelTrainer.evaluation_step, axis_name="devices"
+        )
         self.state = self.create_train_state(learning_rate, input_shape)
-        print(f'Number of accelerators: {self.num_devices}')
-    
+        print(f"Number of accelerators: {self.num_devices}")
 
-    def create_train_state(self, 
-                           learning_rate: float, 
-                           input_shape: Tuple[int, ...]) -> Any:
-        
-        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-        params = self.model.init(rngs, 
-                                 jnp.ones(input_shape, dtype=jnp.int32))['params']
+    def create_train_state(
+        self, learning_rate: float, input_shape: Tuple[int, ...]
+    ) -> Any:
+
+        rngs = {"params": jax.random.key(0), "dropout": jax.random.key(1)}
+        params = self.model.init(rngs, jnp.ones(input_shape, dtype=jnp.int32))["params"]
 
         if self.params_path is not None:
             params = self.load_params(self.params_path)
 
-        self.num_parameters = sum(param.size for param in jax.tree_util.tree_leaves(params))
-        print(f'Number of parameters: {self.num_parameters}')
-        state = train_state.TrainState.create(apply_fn=self.model.apply, 
-                                              params=params, 
-                                              tx=optax.adam(learning_rate))
+        self.num_parameters = sum(
+            param.size for param in jax.tree_util.tree_leaves(params)
+        )
+        print(f"Number of parameters: {self.num_parameters}")
+        state = train_state.TrainState.create(
+            apply_fn=self.model.apply, params=params, tx=optax.adam(learning_rate)
+        )
         return jax.device_put_replicated(state, jax.local_devices())
-    
+
     @staticmethod
-    def train_step(state: Any, 
-                   inputs: jnp.ndarray,
-                   targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
+    def train_step(
+        state: Any, inputs: jnp.ndarray, targets: jnp.ndarray
+    ) -> Tuple[Any, jnp.ndarray]:
+
         def loss_fn(params):
-            logits = state.apply_fn({'params': params}, 
-                                    inputs,
-                                    training=True,
-                                    rngs={'dropout': jax.random.PRNGKey(int(time.time()))})
-            return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
-        
+            logits = state.apply_fn(
+                {"params": params},
+                inputs,
+                training=True,
+                rngs={"dropout": jax.random.PRNGKey(int(time.time()))},
+            )
+            return optax.softmax_cross_entropy_with_integer_labels(
+                logits, targets
+            ).mean()
+
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
         return state, loss
 
-    def train(self, 
-              train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
-              num_epochs: int, 
-              val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        
+    def train(
+        self,
+        train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]],
+        num_epochs: int,
+        val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None,
+    ) -> None:
+
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -1089,35 +1205,36 @@ class MistralDataParallelTrainer:
                 batch_size_per_device = batch_size // self.num_devices
                 inputs = inputs.reshape((self.num_devices, batch_size_per_device, -1))
                 targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
-                self.state, loss = self.train_step(state=self.state, 
-                                                   inputs=inputs, 
-                                                   targets=targets)
+                self.state, loss = self.train_step(
+                    state=self.state, inputs=inputs, targets=targets
+                )
                 total_loss += jnp.mean(loss)
                 count += 1
-            
+
             mean_loss = total_loss / count
-            print(f'Epoch {epoch+1}, Train Loss: {mean_loss}')
+            print(f"Epoch {epoch+1}, Train Loss: {mean_loss}")
 
             if val_loader is not None:
                 val_loss = self.evaluate(val_loader)
-                print(f'Epoch {epoch+1}, Val Loss: {val_loss}')
+                print(f"Epoch {epoch+1}, Val Loss: {val_loss}")
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                 print("New best validation score achieved, saving model...")
                 self.save_params()
-        return 
-    
+        return
+
     @staticmethod
-    def evaluation_step(state: Any, 
-                        inputs: jnp.ndarray,
-                        targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
-        logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})
+    def evaluation_step(
+        state: Any, inputs: jnp.ndarray, targets: jnp.ndarray
+    ) -> Tuple[Any, jnp.ndarray]:
+
+        logits = state.apply_fn(
+            {"params": state.params}, inputs, rngs={"dropout": jax.random.PRNGKey(2)}
+        )
         return optax.softmax_cross_entropy_with_integer_labels(logits, targets).mean()
 
-    def evaluate(self, 
-                 test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        
+    def evaluate(self, test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
+
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
@@ -1128,16 +1245,16 @@ class MistralDataParallelTrainer:
             loss = self.evaluation_step(self.state, inputs, targets)
             total_loss += jnp.mean(loss)
             count += 1
-        
+
         mean_loss = total_loss / count
         return mean_loss
 
     def save_params(self) -> None:
         self.params = flax.jax_utils.unreplicate(self.state.params)
-        with open(self.weights_filename, 'wb') as f:
+        with open(self.weights_filename, "wb") as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        with open(filename, 'rb') as f:
+        with open(filename, "rb") as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

@@ -1,11 +1,13 @@
-import jax
 import time
+from typing import Any, Iterable, Optional, Tuple
+
 import flax
-import optax
-import jax.numpy as jnp
 import flax.linen as nn
+import jax
+import jax.numpy as jnp
+import optax
 from flax.training import train_state
-from typing import Tuple, Any, Optional, Iterable
+
 
 class PatchEmbedding(nn.Module):
     """
@@ -21,18 +23,21 @@ class PatchEmbedding(nn.Module):
         __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
         extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
     """
+
     patch_size: Tuple[int, int]
-    embed_dim: int 
+    embed_dim: int
 
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(self.embed_dim)(self.extract_patches(x))
-        return x + nn.Embed(num_embeddings=x.shape[1], features=x.shape[2])(jnp.arange(x.shape[1]))
+        return x + nn.Embed(num_embeddings=x.shape[1], features=x.shape[2])(
+            jnp.arange(x.shape[1])
+        )
 
     def extract_patches(self, images: jnp.ndarray) -> jnp.ndarray:
         if len(images.shape) != 4:
             raise ValueError("Input images should have shape (batch_size, H, W, C)")
-        
+
         batch_size, h, w, c = images.shape
         ph, pw = self.patch_size
 
@@ -44,11 +49,13 @@ class PatchEmbedding(nn.Module):
         num_patches_w = w // pw
 
         # Reshape the images into patches and flatten each patch
-        patches = jnp.reshape(images, (batch_size, num_patches_h, ph, num_patches_w, pw, c))
+        patches = jnp.reshape(
+            images, (batch_size, num_patches_h, ph, num_patches_w, pw, c)
+        )
         patches = jnp.transpose(patches, (0, 1, 3, 2, 4, 5))
         patches = jnp.reshape(patches, (batch_size, -1, ph * pw * c))
         return patches
-    
+
 
 class SelfMultiHeadAttention(nn.Module):
     """
@@ -65,30 +72,33 @@ class SelfMultiHeadAttention(nn.Module):
         __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
         attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
-    hidden_dim : int  # Output dimension
-    num_heads : int  # Number of parallel heads
+
+    hidden_dim: int  # Output dimension
+    num_heads: int  # Number of parallel heads
 
     def setup(self):
         # Stack all weight matrices together for efficiency
-        self.projection = nn.Dense(3*self.hidden_dim,
-                                 kernel_init=nn.initializers.xavier_uniform(),
-                                 bias_init=nn.initializers.zeros 
-                                )
-        self.output = nn.Dense(self.hidden_dim,
-                               kernel_init=nn.initializers.xavier_uniform(),
-                               bias_init=nn.initializers.zeros)
+        self.projection = nn.Dense(
+            3 * self.hidden_dim,
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
+        self.output = nn.Dense(
+            self.hidden_dim,
+            kernel_init=nn.initializers.xavier_uniform(),
+            bias_init=nn.initializers.zeros,
+        )
 
-
-    def __call__(self, 
-                 inputs: jnp.ndarray, 
-                 mask: jnp.ndarray = None) -> tuple:
+    def __call__(self, inputs: jnp.ndarray, mask: jnp.ndarray = None) -> tuple:
 
         projections = self.projection(inputs)
         query, key, value = jnp.array_split(projections, 3, axis=-1)
-        context_vectors, attention = self.attention_function(query,key, value, mask=mask)
+        context_vectors, attention = self.attention_function(
+            query, key, value, mask=mask
+        )
         outputs = self.output(context_vectors)
         return outputs, attention
-    
+
     def attention_function(self, query, key, value, mask=None):
         input_length = query.shape[1]
         context_length = key.shape[1]
@@ -96,19 +106,29 @@ class SelfMultiHeadAttention(nn.Module):
         dim_key = key.shape[-1]
 
         # Split queries, keys, and values into heads
-        query_heads = jnp.reshape(query, (query.shape[0], self.num_heads, input_length, head_dim))
-        key_heads = jnp.reshape(key, (key.shape[0], self.num_heads, context_length, head_dim))
-        value_heads = jnp.reshape(value, (value.shape[0], self.num_heads, context_length, head_dim))
+        query_heads = jnp.reshape(
+            query, (query.shape[0], self.num_heads, input_length, head_dim)
+        )
+        key_heads = jnp.reshape(
+            key, (key.shape[0], self.num_heads, context_length, head_dim)
+        )
+        value_heads = jnp.reshape(
+            value, (value.shape[0], self.num_heads, context_length, head_dim)
+        )
 
-        attention_scores = jnp.matmul(query_heads, key_heads.transpose(0, 1, 3, 2)) / jnp.sqrt(dim_key)
+        attention_scores = jnp.matmul(
+            query_heads, key_heads.transpose(0, 1, 3, 2)
+        ) / jnp.sqrt(dim_key)
         if mask is not None:
             attention_scores = attention_scores * mask
 
         attention_weights = jax.nn.softmax(attention_scores, axis=-1)
         attended_values = jnp.matmul(attention_weights, value_heads)
-        attended_values = jnp.reshape(attended_values, (query.shape[0], input_length, query.shape[-1]))
+        attended_values = jnp.reshape(
+            attended_values, (query.shape[0], input_length, query.shape[-1])
+        )
         return attended_values, attention_weights
-    
+
 
 class PositionWiseFFN(nn.Module):
     """
@@ -124,12 +144,17 @@ class PositionWiseFFN(nn.Module):
         setup(): Initializes the two linear layers.
         __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
+
     num_hiddens: int
     num_outputs: int
 
     def setup(self):
-        self.dense1 = nn.Dense(self.num_hiddens, kernel_init=nn.initializers.xavier_uniform())
-        self.dense2 = nn.Dense(self.num_outputs, kernel_init=nn.initializers.xavier_uniform())
+        self.dense1 = nn.Dense(
+            self.num_hiddens, kernel_init=nn.initializers.xavier_uniform()
+        )
+        self.dense2 = nn.Dense(
+            self.num_outputs, kernel_init=nn.initializers.xavier_uniform()
+        )
 
     def __call__(self, X: jnp.ndarray) -> jnp.ndarray:
         return self.dense2(nn.gelu(self.dense1(X)))
@@ -147,13 +172,11 @@ class AddNorm(nn.Module):
     Methods:
         __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
+
     dropout: int
 
     @nn.compact
-    def __call__(self, 
-                 X: jnp.ndarray, 
-                 Y: jnp.ndarray, 
-                 training=False) -> jnp.ndarray:
+    def __call__(self, X: jnp.ndarray, Y: jnp.ndarray, training=False) -> jnp.ndarray:
         """
         Apply AddNorm to input tensors.
         Args:
@@ -164,8 +187,9 @@ class AddNorm(nn.Module):
             jnp.ndarray: Output tensor after applying AddNorm.
         """
         return nn.LayerNorm()(
-            nn.Dropout(self.dropout)(Y, deterministic=not training) + X)
-    
+            nn.Dropout(self.dropout)(Y, deterministic=not training) + X
+        )
+
 
 class ViTBlock(nn.Module):
     """
@@ -183,29 +207,30 @@ class ViTBlock(nn.Module):
         setup(): Initializes the attention, feed-forward network, and normalization layers.
         __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
+
     hidden_dim: int
     num_heads: int
     feedforward_dim: int
     dropout: float
 
     def setup(self):
-        self.attention = SelfMultiHeadAttention(hidden_dim=self.hidden_dim, 
-                                                num_heads=self.num_heads)
+        self.attention = SelfMultiHeadAttention(
+            hidden_dim=self.hidden_dim, num_heads=self.num_heads
+        )
         self.ff = PositionWiseFFN(self.feedforward_dim, self.hidden_dim)
         self.add_norm1 = AddNorm(self.dropout)
         self.add_norm2 = AddNorm(self.dropout)
 
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
-        
+    def __call__(
+        self, x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False
+    ) -> tuple:
+
         attended_x, attention = self.attention(x, mask=mask)
         x = self.add_norm1(x, attended_x, training)
         ff_output = self.ff(x)
         x = self.add_norm2(x, ff_output, training)
         return x, attention
-    
+
 
 class ViTEncoder(nn.Module):
     """
@@ -225,6 +250,7 @@ class ViTEncoder(nn.Module):
         setup(): Initializes the patch embedding and encoder blocks.
         __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
+
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -233,20 +259,19 @@ class ViTEncoder(nn.Module):
     dropout: float
 
     def setup(self):
-        self.embedding = PatchEmbedding(self.patch_size, 
-                                        self.feedforward_dim)
-        
-        self.layers = [ViTBlock(self.hidden_dim, 
-                                    self.num_heads, 
-                                    self.feedforward_dim, 
-                                    self.dropout)
-                       for _ in range(self.num_layers)]
+        self.embedding = PatchEmbedding(self.patch_size, self.feedforward_dim)
 
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
-        
+        self.layers = [
+            ViTBlock(
+                self.hidden_dim, self.num_heads, self.feedforward_dim, self.dropout
+            )
+            for _ in range(self.num_layers)
+        ]
+
+    def __call__(
+        self, x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False
+    ) -> tuple:
+
         attention_maps = []
         x = self.embedding(x)
         for layer in self.layers:
@@ -272,14 +297,14 @@ class ViT(nn.Module):
     Methods:
         setup(): Initializes the components of the ViTEncoder.
         __call__(x, mask, training): Processes the input tensor through the encoder, returning encoded features and attention maps.
-    
-    Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning. 
-    The motivation behind Vision Transformers lies in the desire to extend the success of transformers, 
-    originally designed for natural language processing, to visual data. These models aim to replace 
-    or complement traditional Convolutional Neural Networks (CNNs) in image-related tasks. ViTs employ a self-attention mechanism 
-    to capture global dependencies among pixels or patches of an image, which helps them understand context and relationships between different regions effectively. 
-    By utilizing pretraining on large-scale image datasets, ViTs have achieved remarkable performance in image classification, object detection, image generation, and various other computer vision tasks. 
-    Their modular design, scalability, and ability to handle both local and global information have made Vision Transformers a significant advancement in the field, 
+
+    Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning.
+    The motivation behind Vision Transformers lies in the desire to extend the success of transformers,
+    originally designed for natural language processing, to visual data. These models aim to replace
+    or complement traditional Convolutional Neural Networks (CNNs) in image-related tasks. ViTs employ a self-attention mechanism
+    to capture global dependencies among pixels or patches of an image, which helps them understand context and relationships between different regions effectively.
+    By utilizing pretraining on large-scale image datasets, ViTs have achieved remarkable performance in image classification, object detection, image generation, and various other computer vision tasks.
+    Their modular design, scalability, and ability to handle both local and global information have made Vision Transformers a significant advancement in the field,
     offering promising avenues for future research and applications in computer vision.
 
     Example usage:
@@ -291,26 +316,26 @@ class ViT(nn.Module):
 
         # Dummy data parameters
         batch_size = 8
-        max_length = 50 
-        n_outputs = 5  
-        embed_dim = 256  
-        patch_size = (16, 16)  
+        max_length = 50
+        n_outputs = 5
+        embed_dim = 256
+        patch_size = (16, 16)
 
         # Generate data
         dummy_inputs = jnp.ones((batch_size, 224, 224, 3))
         key = jax.random.PRNGKey(10)
-        dummy_labels = jax.random.randint(key, 
-                                        shape=(batch_size,), 
-                                        minval=0, 
+        dummy_labels = jax.random.randint(key,
+                                        shape=(batch_size,),
+                                        minval=0,
                                         maxval=n_outputs-1)
 
         # Create dataset and dataloader
-        dataset = ArrayDataset(dummy_inputs, 
+        dataset = ArrayDataset(dummy_inputs,
                             dummy_labels)
 
-        dataloader = DataLoader(dataset, 
-                                batch_size=batch_size, 
-                                shuffle=True, 
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
                                 drop_last=False)
 
         # model parameters
@@ -336,6 +361,7 @@ class ViT(nn.Module):
         trainer.train(dataloader, 10, dataloader)
         ```
     """
+
     patch_size: Tuple[int, int]
     num_layers: int
     hidden_dim: int
@@ -351,25 +377,24 @@ class ViT(nn.Module):
             hidden_dim=self.hidden_dim,
             num_heads=self.num_heads,
             feedforward_dim=self.feedforward_dim,
-            dropout=self.dropout
+            dropout=self.dropout,
         )
         self.dropout_layer = nn.Dropout(self.dropout)
         self.output = nn.Dense(self.n_outputs)
 
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 mask: jnp.ndarray = None, 
-                 training: bool = False) -> tuple:
-        
+    def __call__(
+        self, x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False
+    ) -> tuple:
+
         x, attention_maps = self.encoder(x=x, mask=mask, training=training)
         x = self.dropout_layer(x, deterministic=not training)
-        return self.output(x[:,0,:]), x, attention_maps
+        return self.output(x[:, 0, :]), x, attention_maps
 
 
 class ViTDataParallelTrainer:
     """
     Trainer class using data parallelism with JAX.
-    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs).
     It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
@@ -388,12 +413,15 @@ class ViTDataParallelTrainer:
         save_params(): Saves the model parameters to a file.
         load_params(filename): Loads model parameters from a file.
     """
-    def __init__(self, 
-                 model: Any, 
-                 input_shape: Tuple[int, ...],
-                 weights_filename: str,
-                 learning_rate: float = 1e-5,
-                 params_path: Optional[str] = None) -> None:
+
+    def __init__(
+        self,
+        model: Any,
+        input_shape: Tuple[int, ...],
+        weights_filename: str,
+        learning_rate: float = 1e-5,
+        params_path: Optional[str] = None,
+    ) -> None:
         self.model = model
         self.params = None
         self.params_path = params_path
@@ -401,107 +429,137 @@ class ViTDataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(ViTDataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(ViTDataParallelTrainer.evaluation_step, axis_name='devices')
+        self.train_step = jax.pmap(
+            ViTDataParallelTrainer.train_step, axis_name="devices"
+        )
+        self.evaluation_step = jax.pmap(
+            ViTDataParallelTrainer.evaluation_step, axis_name="devices"
+        )
         self.state = self.create_train_state(learning_rate, input_shape)
-        print(f'Number of accelerators: {self.num_devices}')
-    
+        print(f"Number of accelerators: {self.num_devices}")
 
-    def create_train_state(self, 
-                           learning_rate: float, 
-                           input_shape: Tuple[int, ...]) -> Any:
-        
-        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-        params = self.model.init(rngs, jnp.ones(input_shape))['params']
+    def create_train_state(
+        self, learning_rate: float, input_shape: Tuple[int, ...]
+    ) -> Any:
+
+        rngs = {"params": jax.random.key(0), "dropout": jax.random.key(1)}
+        params = self.model.init(rngs, jnp.ones(input_shape))["params"]
 
         if self.params_path is not None:
             params = self.load_params(self.params_path)
 
-        self.num_parameters = sum(param.size for param in jax.tree_util.tree_leaves(params))
-        print(f'Number of parameters: {self.num_parameters}')
-        state = train_state.TrainState.create(apply_fn=self.model.apply, 
-                                              params=params, 
-                                              tx=optax.adam(learning_rate))
+        self.num_parameters = sum(
+            param.size for param in jax.tree_util.tree_leaves(params)
+        )
+        print(f"Number of parameters: {self.num_parameters}")
+        state = train_state.TrainState.create(
+            apply_fn=self.model.apply, params=params, tx=optax.adam(learning_rate)
+        )
         return jax.device_put_replicated(state, jax.local_devices())
-    
+
     @staticmethod
-    def train_step(state: Any, 
-                   inputs: jnp.ndarray,
-                   targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
+    def train_step(
+        state: Any, inputs: jnp.ndarray, targets: jnp.ndarray
+    ) -> Tuple[Any, jnp.ndarray]:
+
         def loss_fn(params):
-            logits = state.apply_fn({'params': params}, 
-                                    inputs, 
-                                    training=True,
-                                    rngs={'dropout': jax.random.PRNGKey(int(time.time()))})[0]
-            return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
-        
+            logits = state.apply_fn(
+                {"params": params},
+                inputs,
+                training=True,
+                rngs={"dropout": jax.random.PRNGKey(int(time.time()))},
+            )[0]
+            return -jnp.mean(
+                jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets]
+            )
+
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
         return state, loss
 
-    def train(self, 
-              train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
-              num_epochs: int, 
-              val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        
+    def train(
+        self,
+        train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]],
+        num_epochs: int,
+        val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None,
+    ) -> None:
+
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
             for inputs, targets in train_loader:
                 batch_size = inputs.shape[0]
                 batch_size_per_device = batch_size // self.num_devices
-                inputs = inputs.reshape((self.num_devices, batch_size_per_device, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
+                inputs = inputs.reshape(
+                    (
+                        self.num_devices,
+                        batch_size_per_device,
+                        inputs.shape[1],
+                        inputs.shape[2],
+                        inputs.shape[3],
+                    )
+                )
                 targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
-                self.state, loss = self.train_step(state=self.state, 
-                                                   inputs=inputs, 
-                                                   targets=targets)
+                self.state, loss = self.train_step(
+                    state=self.state, inputs=inputs, targets=targets
+                )
                 total_loss += jnp.mean(loss)
                 count += 1
-            
+
             mean_loss = total_loss / count
-            print(f'Epoch {epoch+1}, Train Loss: {mean_loss}')
+            print(f"Epoch {epoch+1}, Train Loss: {mean_loss}")
 
             if val_loader is not None:
                 val_loss = self.evaluate(val_loader)
-                print(f'Epoch {epoch+1}, Val Loss: {val_loss}')
+                print(f"Epoch {epoch+1}, Val Loss: {val_loss}")
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                 print("New best validation score achieved, saving model...")
                 self.save_params()
-        return 
-    
-    @staticmethod
-    def evaluation_step(state: Any, 
-                        inputs: jnp.ndarray,
-                        targets: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
-        logits = state.apply_fn({'params': state.params}, inputs,  rngs={'dropout': jax.random.PRNGKey(2)})[0]
-        return -jnp.mean(jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets])
+        return
 
-    def evaluate(self, 
-                 test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        
+    @staticmethod
+    def evaluation_step(
+        state: Any, inputs: jnp.ndarray, targets: jnp.ndarray
+    ) -> Tuple[Any, jnp.ndarray]:
+
+        logits = state.apply_fn(
+            {"params": state.params}, inputs, rngs={"dropout": jax.random.PRNGKey(2)}
+        )[0]
+        return -jnp.mean(
+            jax.vmap(jax.nn.log_softmax)(logits)[jnp.arange(targets.size), targets]
+        )
+
+    def evaluate(self, test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
+
         total_loss = 0.0
         count = 0
         for inputs, targets in test_loader:
             batch_size = inputs.shape[0]
             batch_size_per_device = batch_size // self.num_devices
-            inputs = inputs.reshape((self.num_devices, batch_size_per_device, inputs.shape[1], inputs.shape[2], inputs.shape[3]))
+            inputs = inputs.reshape(
+                (
+                    self.num_devices,
+                    batch_size_per_device,
+                    inputs.shape[1],
+                    inputs.shape[2],
+                    inputs.shape[3],
+                )
+            )
             targets = targets.reshape((self.num_devices, batch_size_per_device, -1))
             loss = self.evaluation_step(self.state, inputs, targets)
             total_loss += jnp.mean(loss)
             count += 1
-        
+
         mean_loss = total_loss / count
         return mean_loss
 
     def save_params(self) -> None:
         self.params = flax.jax_utils.unreplicate(self.state.params)
-        with open(self.weights_filename, 'wb') as f:
+        with open(self.weights_filename, "wb") as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        with open(filename, 'rb') as f:
+        with open(filename, "rb") as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params

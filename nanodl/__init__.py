@@ -1,158 +1,118 @@
-__version__ = "1.2.3.dev1"
+__version__ = "1.2.4.dev1"
 
-from nanodl.__src.sklearn_gpu.bayes import NaiveBayesClassifier
-from nanodl.__src.sklearn_gpu.dimensionality_reduction import PCA
-from nanodl.__src.sklearn_gpu.clustering import KMeans, GaussianMixtureModel
-from nanodl.__src.utils.tokenizer import Tokenizer
-from nanodl.__src.utils.random import *
-
-from nanodl.__src.sklearn_gpu.regression import (
-    LinearRegression, 
-    LogisticRegression, 
-    GaussianProcess
+from nanodl.__src.classical.bayes import NaiveBayesClassifier
+from nanodl.__src.classical.clustering import GaussianMixtureModel, KMeans
+from nanodl.__src.classical.dimensionality_reduction import PCA
+from nanodl.__src.classical.regression import (
+    GaussianProcess,
+    LinearRegression,
+    LogisticRegression,
 )
-
-from nanodl.__src.models.gat import (
-    GAT, 
-    GraphAttentionLayer
+from nanodl.__src.experimental.gat import GAT, GraphAttentionLayer
+from nanodl.__src.models.attention import (
+    GatedMultiHeadAttention,
+    HierarchicalMultiHeadAttention,
+    LocalMultiHeadAttention,
+    MultiQueryAttention,
+    RotaryMultiHeadAttention,
 )
-
-from nanodl.__src.models.t5 import (
-    T5,
-    T5DataParallelTrainer,
-    T5Encoder,
-    T5Decoder,
-    T5EncoderBlock,
-    T5DecoderBlock
-)
-
-from nanodl.__src.models.vit import (
-    ViT,
-    ViTDataParallelTrainer,
-    ViTBlock,
-    ViTEncoder,
-    PatchEmbedding
-)
-
 from nanodl.__src.models.clip import (
     CLIP,
     CLIPDataParallelTrainer,
     ImageEncoder,
+    SelfMultiHeadAttention,
     TextEncoder,
-    SelfMultiHeadAttention
 )
-
-from nanodl.__src.models.lamda import (
-    LaMDA,
-    LaMDADataParallelTrainer,
-    LaMDABlock,
-    LaMDADecoder,
-    RelativeMultiHeadAttention
-)
-
-from nanodl.__src.models.mixer import (
-    Mixer,
-    MixerDataParallelTrainer,
-    MixerBlock,
-    MixerEncoder
-)
-
-from nanodl.__src.models.llama import (
-    LlaMA2,
-    LlaMADataParallelTrainer,
-    RotaryPositionalEncoding,
-    LlaMA2Decoder,
-    LlaMA2DecoderBlock,
-    GroupedRotaryMultiHeadAttention
-)
-
-from nanodl.__src.models.gpt import (
-    GPT3,
-    GPT4,
-    GPTDataParallelTrainer,
-    GPT3Block,
-    GPT4Block,
-    GPT3Decoder,
-    GPT4Decoder,
-    PositionWiseFFN
-)
-
-from nanodl.__src.models.mistral import (
-    Mistral,
-    MistralDataParallelTrainer,
-    MistralDecoder,
-    MistralDecoderBlock,
-    GroupedRotaryShiftedWindowMultiHeadAttention
-)
-
-from nanodl.__src.models.mistral import (
-    Mixtral,
-    MixtralDecoder,
-    MixtralDecoderBlock,
-    GroupedRotaryShiftedWindowMultiHeadAttention
-)
-
-from nanodl.__src.models.whisper import (
-    Whisper,
-    WhisperDataParallelTrainer,
-    WhisperSpeechEncoder,
-    WhisperSpeechEncoderBlock
-)
-
 from nanodl.__src.models.diffusion import (
-    DiffusionModel,
     DiffusionDataParallelTrainer,
+    DiffusionModel,
     UNet,
     UNetDownBlock,
+    UNetResidualBlock,
     UNetUpBlock,
-    UNetResidualBlock
 )
-
-
-from nanodl.__src.models.transformer import (
-    Transformer,
-    TransformerDataParallelTrainer,
-    TransformerEncoder,
-    TransformerDecoderBlock,
-    PositionalEncoding,
-    PositionWiseFFN,
-    TokenAndPositionEmbedding,
-    MultiHeadAttention,
-    AddNorm
-)
-
 from nanodl.__src.models.gemma import (
     Gemma,
     GemmaDataParallelTrainer,
     GemmaDecoder,
-    GemmaDecoderBlock
+    GemmaDecoderBlock,
 )
-
-from nanodl.__src.models.reward import (
-    RewardModel,
-    RewardDataParallelTrainer
+from nanodl.__src.models.gpt import (
+    GPT3,
+    GPT4,
+    GPT3Block,
+    GPT3Decoder,
+    GPT4Block,
+    GPT4Decoder,
+    GPTDataParallelTrainer,
+    PositionWiseFFN,
 )
-
-from nanodl.__src.models.ijepa import (
-    IJEPA,
-    IJEPADataParallelTrainer,
-    IJEPADataSampler
+from nanodl.__src.models.ijepa import IJEPA, IJEPADataParallelTrainer, IJEPADataSampler
+from nanodl.__src.models.lamda import (
+    LaMDA,
+    LaMDABlock,
+    LaMDADataParallelTrainer,
+    LaMDADecoder,
+    RelativeMultiHeadAttention,
 )
-
-from nanodl.__src.layers.attention import (
-    MultiQueryAttention,
-    LocalMultiHeadAttention,
-    HierarchicalMultiHeadAttention,
-    GatedMultiHeadAttention,
-    RotaryMultiHeadAttention
+from nanodl.__src.models.llama import (
+    GroupedRotaryMultiHeadAttention,
+    Llama3,
+    Llama3Decoder,
+    Llama3DecoderBlock,
+    LlamaDataParallelTrainer,
+    RotaryPositionalEncoding,
 )
-
-from nanodl.__src.utils.data import (
-    Dataset, 
-    ArrayDataset, 
-    DataLoader
+from nanodl.__src.models.mistral import (
+    GroupedRotaryShiftedWindowMultiHeadAttention,
+    Mistral,
+    MistralDataParallelTrainer,
+    MistralDecoder,
+    MistralDecoderBlock,
+    Mixtral,
+    MixtralDecoder,
+    MixtralDecoderBlock,
 )
-
+from nanodl.__src.models.mixer import (
+    Mixer,
+    MixerBlock,
+    MixerDataParallelTrainer,
+    MixerEncoder,
+)
+from nanodl.__src.models.reward import RewardDataParallelTrainer, RewardModel
+from nanodl.__src.models.t5 import (
+    T5,
+    T5DataParallelTrainer,
+    T5Decoder,
+    T5DecoderBlock,
+    T5Encoder,
+    T5EncoderBlock,
+)
+from nanodl.__src.models.transformer import (
+    AddNorm,
+    MultiHeadAttention,
+    PositionalEncoding,
+    PositionWiseFFN,
+    TokenAndPositionEmbedding,
+    Transformer,
+    TransformerDataParallelTrainer,
+    TransformerDecoderBlock,
+    TransformerEncoder,
+)
+from nanodl.__src.models.vit import (
+    PatchEmbedding,
+    ViT,
+    ViTBlock,
+    ViTDataParallelTrainer,
+    ViTEncoder,
+)
+from nanodl.__src.models.whisper import (
+    Whisper,
+    WhisperDataParallelTrainer,
+    WhisperSpeechEncoder,
+    WhisperSpeechEncoderBlock,
+)
+from nanodl.__src.utils.data import ArrayDataset, DataLoader, Dataset
 from nanodl.__src.utils.ml import (
     batch_cosine_similarities,
     batch_pearsonr,
@@ -164,19 +124,18 @@ from nanodl.__src.utils.ml import (
     jaccard,
     kl_divergence,
     mean_reciprocal_rank,
-    zero_pad_sequences
+    zero_pad_sequences,
 )
-
-from nanodl.__src.utils.nlp import(
+from nanodl.__src.utils.nlp import (
     bleu,
     cider_score,
     meteor,
     perplexity,
     rouge,
-    word_error_rate
+    word_error_rate,
 )
-
-from nanodl.__src.utils.vision import(
+from nanodl.__src.utils.random import *
+from nanodl.__src.utils.vision import (
     adjust_brightness,
     adjust_contrast,
     flip_image,
@@ -187,7 +146,6 @@ from nanodl.__src.utils.vision import(
     sobel_edge_detection,
 )
 
-
 __all__ = [
     # Sklearn GPU
     "NaiveBayesClassifier",
@@ -197,7 +155,6 @@ __all__ = [
     "LinearRegression",
     "LogisticRegression",
     "GaussianProcess",
-    
     # Models
     "IJEPA",
     "IJEPADataParallelTrainer",
@@ -206,7 +163,7 @@ __all__ = [
     "GemmaDataParallelTrainer",
     "GemmaDecoder",
     "GemmaDecoderBlock",
-    "GAT", 
+    "GAT",
     "GraphAttentionLayer",
     "T5",
     "T5DataParallelTrainer",
@@ -233,11 +190,11 @@ __all__ = [
     "MixerDataParallelTrainer",
     "MixerBlock",
     "MixerEncoder",
-    "LlaMA2",
-    "LlaMADataParallelTrainer",
+    "Llama3",
+    "LlamaDataParallelTrainer",
     "RotaryPositionalEncoding",
-    "LlaMA2Decoder",
-    "LlaMA2DecoderBlock",
+    "Llama3Decoder",
+    "Llama3DecoderBlock",
     "GroupedRotaryMultiHeadAttention",
     "GPT3",
     "GPT4",
@@ -276,12 +233,10 @@ __all__ = [
     "TokenAndPositionEmbedding",
     "MultiHeadAttention",
     "AddNorm",
-
     # Utilities
-    "Dataset", 
-    "ArrayDataset", 
+    "Dataset",
+    "ArrayDataset",
     "DataLoader",
-    "Tokenizer",
     "batch_cosine_similarities",
     "batch_pearsonr",
     "classification_scores",
@@ -312,7 +267,6 @@ __all__ = [
     "HierarchicalMultiHeadAttention",
     "GatedMultiHeadAttention",
     "RotaryMultiHeadAttention",
-    
     # Random
     "time_rng_key",
     "uniform",
@@ -336,31 +290,37 @@ __all__ = [
 import importlib
 import sys
 
+
 def check_library_installed(lib_name):
     try:
         return importlib.import_module(lib_name)
     except ImportError:
         raise ImportError(f"{lib_name} is not installed or improperly installed.")
 
+
 def test_flax(flax):
     model = flax.linen.Dense(features=10)
+
 
 def test_jax(jax):
     arr = jax.numpy.array([1, 2, 3])
     result = jax.numpy.sum(arr)
 
+
 def test_optax(optax):
     optimizer = optax.sgd(learning_rate=0.1)
 
+
 def test_einops(einops):
-    arr = einops.rearrange([1, 2, 3], 'a b c -> b a c')
+    arr = einops.rearrange([1, 2, 3], "a b c -> b a c")
+
 
 def main():
     try:
-        flax = check_library_installed('flax')
-        jax = check_library_installed('jax')
-        optax = check_library_installed('optax')
-        einops = check_library_installed('einops')
+        flax = check_library_installed("flax")
+        jax = check_library_installed("jax")
+        optax = check_library_installed("optax")
+        einops = check_library_installed("einops")
 
         test_flax(flax)
         test_jax(jax)
@@ -372,6 +332,7 @@ def main():
     except Exception as e:
         print(f"An error occurred while verifying Jax/Flax/Optax installation: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

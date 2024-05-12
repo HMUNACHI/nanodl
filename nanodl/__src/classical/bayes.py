@@ -1,8 +1,12 @@
-import jax
-import jax.numpy as jnp
 from typing import Tuple
 
-def fit_naive_bayes(X: jnp.ndarray, y: jnp.ndarray, num_classes: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+import jax
+import jax.numpy as jnp
+
+
+def fit_naive_bayes(
+    X: jnp.ndarray, y: jnp.ndarray, num_classes: int
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
     class_priors = jnp.zeros(num_classes)
     feature_probs = jnp.zeros((num_classes, X.shape[1]))
 
@@ -15,8 +19,11 @@ def fit_naive_bayes(X: jnp.ndarray, y: jnp.ndarray, num_classes: int) -> Tuple[j
 
     return class_priors, feature_probs
 
+
 @jax.jit
-def predict_naive_bayes(X: jnp.ndarray, class_priors: jnp.ndarray, feature_probs: jnp.ndarray) -> jnp.ndarray:
+def predict_naive_bayes(
+    X: jnp.ndarray, class_priors: jnp.ndarray, feature_probs: jnp.ndarray
+) -> jnp.ndarray:
     # Calculate log probabilities for features
     log_feature_probs = jnp.log(feature_probs)
     log_feature_probs_neg = jnp.log(1 - feature_probs)
@@ -26,13 +33,17 @@ def predict_naive_bayes(X: jnp.ndarray, class_priors: jnp.ndarray, feature_probs
     expanded_log_feature_probs_neg = log_feature_probs_neg[:, None, :]
 
     # Calculate log probabilities for each sample and class
-    log_probs = jnp.sum(expanded_log_feature_probs * X + expanded_log_feature_probs_neg * (1 - X), axis=2)
+    log_probs = jnp.sum(
+        expanded_log_feature_probs * X + expanded_log_feature_probs_neg * (1 - X),
+        axis=2,
+    )
     log_probs += jnp.log(class_priors)[:, None]
     return jnp.argmax(log_probs, axis=0)
 
-@jax.jit
+
 def accuracy(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> float:
     return jnp.mean(y_true == y_pred)
+
 
 class NaiveBayesClassifier:
     """

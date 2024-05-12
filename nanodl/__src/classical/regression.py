@@ -1,6 +1,8 @@
+from typing import Callable, Tuple
+
 import jax
 import jax.numpy as jnp
-from typing import Callable, Tuple
+
 
 class LinearRegression:
     """
@@ -33,6 +35,7 @@ class LinearRegression:
     print("Learned Bias:", learned_bias)
     ```
     """
+
     def __init__(self, input_dim, output_dim):
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -63,7 +66,6 @@ class LinearRegression:
 
     def get_params(self):
         return self.params
-    
 
 
 class LogisticRegression:
@@ -97,6 +99,7 @@ class LogisticRegression:
         print("Predictions:", predictions)
         ```
     """
+
     def __init__(self, input_dim):
         self.input_dim = input_dim
         self.key = jax.random.PRNGKey(0)
@@ -129,7 +132,7 @@ class LogisticRegression:
 
     def predict(self, x_data):
         return self.logistic_regression(self.params, x_data)
-    
+
 
 class GaussianProcess:
     """
@@ -165,26 +168,25 @@ class GaussianProcess:
         mean, covariance = gp.predict(X_new)
     """
 
-    def __init__(self, 
-                 kernel: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], 
-                 noise: float = 1e-3):
-        
+    def __init__(
+        self,
+        kernel: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray],
+        noise: float = 1e-3,
+    ):
+
         self.kernel = kernel
         self.noise = noise
         self.X = None
         self.y = None
         self.K = None
 
-    def fit(self, 
-            X: jnp.ndarray, 
-            y: jnp.ndarray) -> None:
-        
+    def fit(self, X: jnp.ndarray, y: jnp.ndarray) -> None:
+
         self.X = X
         self.y = y
         self.K = self.kernel(self.X, self.X) + jnp.eye(len(X)) * self.noise
 
-    def predict(self, 
-                X_new: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def predict(self, X_new: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         K_inv = jnp.linalg.inv(self.K)
         K_s = self.kernel(self.X, X_new)
         K_ss = self.kernel(X_new, X_new)

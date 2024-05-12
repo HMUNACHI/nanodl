@@ -1,6 +1,8 @@
+import time
+
 import jax
 import jax.numpy as jnp
-import time
+
 
 @jax.jit
 def normalize_images(images: jnp.ndarray) -> jnp.ndarray:
@@ -26,8 +28,7 @@ def normalize_images(images: jnp.ndarray) -> jnp.ndarray:
     return (images - mean) / (std + 1e-5)
 
 
-def random_crop(images: jnp.ndarray, 
-                crop_size: int) -> jnp.ndarray:
+def random_crop(images: jnp.ndarray, crop_size: int) -> jnp.ndarray:
     """
     Randomly crop a batch of images to a specified size using JAX.
 
@@ -61,9 +62,7 @@ def random_crop(images: jnp.ndarray,
     return crops
 
 
-def gaussian_blur(image: jnp.ndarray, 
-                  kernel_size: int, 
-                  sigma: float) -> jnp.ndarray:
+def gaussian_blur(image: jnp.ndarray, kernel_size: int, sigma: float) -> jnp.ndarray:
     """
     Apply Gaussian blur to a multi-channel image.
 
@@ -89,7 +88,13 @@ def gaussian_blur(image: jnp.ndarray,
     kernel = kernel / jnp.sum(kernel)
 
     # Apply convolution to each channel
-    blurred_image = jnp.stack([jax.scipy.signal.convolve2d(image[:, :, i], kernel, mode='same') for i in range(image.shape[2])], axis=-1)
+    blurred_image = jnp.stack(
+        [
+            jax.scipy.signal.convolve2d(image[:, :, i], kernel, mode="same")
+            for i in range(image.shape[2])
+        ],
+        axis=-1,
+    )
     return blurred_image
 
 
@@ -115,18 +120,22 @@ def sobel_edge_detection(image: jnp.ndarray) -> jnp.ndarray:
     sobel_y = jnp.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=jnp.float32)
 
     def apply_sobel(channel):
-        gx = jax.scipy.signal.convolve2d(channel, sobel_x, mode='same')
-        gy = jax.scipy.signal.convolve2d(channel, sobel_y, mode='same')
+        gx = jax.scipy.signal.convolve2d(channel, sobel_x, mode="same")
+        gy = jax.scipy.signal.convolve2d(channel, sobel_y, mode="same")
         return jnp.sqrt(gx**2 + gy**2)
 
     # Apply Sobel filter to each channel and sum the results
-    edges = jnp.sum(jnp.stack([apply_sobel(image[:, :, i]) for i in range(image.shape[2])], axis=-1), axis=-1)
+    edges = jnp.sum(
+        jnp.stack(
+            [apply_sobel(image[:, :, i]) for i in range(image.shape[2])], axis=-1
+        ),
+        axis=-1,
+    )
     return edges
 
 
 @jax.jit
-def adjust_brightness(image: jnp.ndarray, 
-                      factor: float) -> jnp.ndarray:
+def adjust_brightness(image: jnp.ndarray, factor: float) -> jnp.ndarray:
     """
     Adjust the brightness of an image.
 
@@ -179,7 +188,7 @@ def flip_image(image: jnp.ndarray, horizontal: jnp.ndarray) -> jnp.ndarray:
 
     Args:
         image (jnp.ndarray): Input image of shape (H, W, C).
-        horizontal (jnp.ndarray): If True (jax.numpy.array with a single True value), flip horizontally; 
+        horizontal (jnp.ndarray): If True (jax.numpy.array with a single True value), flip horizontally;
                                   otherwise, flip vertically.
 
     Returns:
@@ -197,9 +206,9 @@ def flip_image(image: jnp.ndarray, horizontal: jnp.ndarray) -> jnp.ndarray:
 
 
 @jax.jit
-def random_flip_image(image: jnp.ndarray, 
-                      key: jax.random.PRNGKey, 
-                      horizontal: jnp.ndarray) -> jnp.ndarray:
+def random_flip_image(
+    image: jnp.ndarray, key: jax.random.PRNGKey, horizontal: jnp.ndarray
+) -> jnp.ndarray:
     """
     Randomly flip an image horizontally or vertically using JAX.
 

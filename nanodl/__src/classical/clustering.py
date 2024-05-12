@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jax import random, ops
-from typing import Optional
+
 
 class KMeans:
     """
@@ -25,41 +24,37 @@ class KMeans:
     ```
     """
 
-    def __init__(self, 
-                 k: int, 
-                 num_iters: int = 100, 
-                 random_seed: int = 0) -> None:
+    def __init__(self, k: int, num_iters: int = 100, random_seed: int = 0) -> None:
         self.k = k
         self.num_iters = num_iters
         self.random_seed = random_seed
         self.centroids = None
         self.clusters = None
 
-    def initialize_centroids(self, 
-                             X: jnp.ndarray) -> jnp.ndarray:
-        
+    def initialize_centroids(self, X: jnp.ndarray) -> jnp.ndarray:
+
         indices = jnp.arange(X.shape[0])
-        selected = jax.random.choice(jax.random.PRNGKey(self.random_seed), 
-                                     indices, 
-                                     shape=(self.k,), 
-                                     replace=False)
+        selected = jax.random.choice(
+            jax.random.PRNGKey(self.random_seed),
+            indices,
+            shape=(self.k,),
+            replace=False,
+        )
         return X[selected]
 
-    def assign_clusters(self, 
-                        X: jnp.ndarray, 
-                        centroids: jnp.ndarray) -> jnp.ndarray:
-        
-        distances = jnp.sqrt(((X[:, jnp.newaxis, :] - centroids[jnp.newaxis, :, :]) ** 2).sum(axis=2))
+    def assign_clusters(self, X: jnp.ndarray, centroids: jnp.ndarray) -> jnp.ndarray:
+
+        distances = jnp.sqrt(
+            ((X[:, jnp.newaxis, :] - centroids[jnp.newaxis, :, :]) ** 2).sum(axis=2)
+        )
         return jnp.argmin(distances, axis=1)
 
-    def update_centroids(self, X: jnp.ndarray, 
-                         clusters: jnp.ndarray) -> jnp.ndarray:
-        
+    def update_centroids(self, X: jnp.ndarray, clusters: jnp.ndarray) -> jnp.ndarray:
+
         return jnp.array([X[clusters == i].mean(axis=0) for i in range(self.k)])
 
-    def fit(self, 
-            X: jnp.ndarray) -> None:
-        
+    def fit(self, X: jnp.ndarray) -> None:
+
         self.centroids = self.initialize_centroids(X)
         for _ in range(self.num_iters):
             self.clusters = self.assign_clusters(X, self.centroids)
@@ -68,18 +63,17 @@ class KMeans:
                 break
             self.centroids = new_centroids
 
-    def predict(self, 
-                X: jnp.ndarray) -> jnp.ndarray:
+    def predict(self, X: jnp.ndarray) -> jnp.ndarray:
         if self.centroids is None:
             raise ValueError("Model not yet trained. Call 'fit' with training data.")
         return self.assign_clusters(X, self.centroids)
-    
+
 
 class GaussianMixtureModel:
     """
     Gaussian Mixture Model implemented in JAX.
 
-    This class represents a Gaussian Mixture Model (GMM) for clustering and density estimation. 
+    This class represents a Gaussian Mixture Model (GMM) for clustering and density estimation.
     It uses the Expectation-Maximization (EM) algorithm for fitting the model to data.
 
     Attributes:
@@ -105,11 +99,9 @@ class GaussianMixtureModel:
     ```
     """
 
-    def __init__(self, 
-                 n_components: int, 
-                 tol: float = 1e-3, 
-                 max_iter: int = 100, 
-                 seed: int = 0) -> None:
+    def __init__(
+        self, n_components: int, tol: float = 1e-3, max_iter: int = 100, seed: int = 0
+    ) -> None:
         self.n_components = n_components
         self.tol = tol
         self.max_iter = max_iter
@@ -118,18 +110,16 @@ class GaussianMixtureModel:
         self.weights = None
         self.seed = seed
 
-    def fit(self, 
-            X: jnp.ndarray) -> None:
+    def fit(self, X: jnp.ndarray) -> None:
         _, n_features = X.shape
         rng = jax.random.PRNGKey(self.seed)
 
-        # Step 1: Initialization
         self.means = jax.random.normal(rng, (self.n_components, n_features))
         self.covariances = jnp.array([jnp.eye(n_features)] * self.n_components)
         self.weights = jnp.ones(self.n_components) / self.n_components
 
         log_likelihood = 0
-        for iteration in range(self.max_iter):
+        for _ in range(self.max_iter):
             responsibilities = self._e_step(X)
             self._m_step(X, responsibilities)
 
@@ -138,41 +128,49 @@ class GaussianMixtureModel:
                 break
             log_likelihood = new_log_likelihood
 
-    def _e_step(self, 
-                X: jnp.ndarray) -> jnp.ndarray:
+    def _e_step(self, X: jnp.ndarray) -> jnp.ndarray:
         responsibilities = jnp.zeros((X.shape[0], self.n_components))
         for k in range(self.n_components):
-            responsibilities = responsibilities.at[:, k].set(self.weights[k] * self._multivariate_gaussian(X, self.means[k], self.covariances[k]))
+            responsibilities = responsibilities.at[:, k].set(
+                self.weights[k]
+                * self._multivariate_gaussian(X, self.means[k], self.covariances[k])
+            )
         responsibilities /= responsibilities.sum(axis=1, keepdims=True)
         return responsibilities
 
-    def _m_step(self, 
-                X: jnp.ndarray, 
-                responsibilities: jnp.ndarray) -> None:
+    def _m_step(self, X: jnp.ndarray, responsibilities: jnp.ndarray) -> None:
         n_samples = X.shape[0]
         for k in range(self.n_components):
             Nk = responsibilities[:, k].sum()
-            self.means = self.means.at[k].set((1 / Nk) * jnp.dot(responsibilities[:, k], X))
+            self.means = self.means.at[k].set(
+                (1 / Nk) * jnp.dot(responsibilities[:, k], X)
+            )
             diff = X - self.means[k]
-            self.covariances = self.covariances.at[k].set((1 / Nk) * jnp.dot(responsibilities[:, k] * diff.T, diff))
+            self.covariances = self.covariances.at[k].set(
+                (1 / Nk) * jnp.dot(responsibilities[:, k] * diff.T, diff)
+            )
             self.weights = self.weights.at[k].set(Nk / n_samples)
 
-    def _multivariate_gaussian(self, 
-                               X: jnp.ndarray, 
-                               mean: jnp.ndarray, 
-                               cov: jnp.ndarray) -> jnp.ndarray:
+    def _multivariate_gaussian(
+        self, X: jnp.ndarray, mean: jnp.ndarray, cov: jnp.ndarray
+    ) -> jnp.ndarray:
         n = X.shape[1]
         diff = X - mean
-        return jnp.exp(-0.5 * jnp.sum(jnp.dot(diff, jnp.linalg.inv(cov)) * diff, axis=1)) / (jnp.sqrt((2 * jnp.pi) ** n * jnp.linalg.det(cov)))
+        return jnp.exp(
+            -0.5 * jnp.sum(jnp.dot(diff, jnp.linalg.inv(cov)) * diff, axis=1)
+        ) / (jnp.sqrt((2 * jnp.pi) ** n * jnp.linalg.det(cov)))
 
-    def _compute_log_likelihood(self, 
-                                X: jnp.ndarray) -> float:
+    def _compute_log_likelihood(self, X: jnp.ndarray) -> float:
         log_likelihood = 0
         for k in range(self.n_components):
-            log_likelihood += jnp.sum(jnp.log(self.weights[k] * self._multivariate_gaussian(X, self.means[k], self.covariances[k])))
+            log_likelihood += jnp.sum(
+                jnp.log(
+                    self.weights[k]
+                    * self._multivariate_gaussian(X, self.means[k], self.covariances[k])
+                )
+            )
         return log_likelihood
-    
-    def predict(self, 
-                X: jnp.ndarray) -> jnp.ndarray:
+
+    def predict(self, X: jnp.ndarray) -> jnp.ndarray:
         responsibilities = self._e_step(X)
         return jnp.argmax(responsibilities, axis=1)

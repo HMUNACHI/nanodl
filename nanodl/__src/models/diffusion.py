@@ -1,12 +1,12 @@
-import jax
-import flax
 import time
-import optax
-import jax.numpy as jnp
-import flax.linen as nn
+from typing import Any, Iterable, List, Optional, Tuple
 
+import flax
+import flax.linen as nn
+import jax
+import jax.numpy as jnp
+import optax
 from flax.training import train_state
-from typing import Any, Iterable, Optional, Tuple, Dict, List
 
 
 class SinusoidalEmbedding(nn.Module):
@@ -24,6 +24,7 @@ class SinusoidalEmbedding(nn.Module):
         setup(): Initializes the layer by computing the angular speeds for the sinusoidal functions based on the specified frequency range.
         __call__(x: jnp.ndarray): Generates the sinusoidal embeddings for the input positions.
     """
+
     embedding_dims: int
     embedding_min_frequency: float
     embedding_max_frequency: float
@@ -36,9 +37,12 @@ class SinusoidalEmbedding(nn.Module):
         self.angular_speeds = 2.0 * jnp.pi * frequencies
 
     def __call__(self, x):
-        embeddings = jnp.concatenate([jnp.sin(self.angular_speeds * x), jnp.cos(self.angular_speeds * x)], axis=-1)
+        embeddings = jnp.concatenate(
+            [jnp.sin(self.angular_speeds * x), jnp.cos(self.angular_speeds * x)],
+            axis=-1,
+        )
         return embeddings
-    
+
 
 class UNetResidualBlock(nn.Module):
     """
@@ -52,17 +56,17 @@ class UNetResidualBlock(nn.Module):
     Methods:
         __call__(x: jnp.ndarray): Processes the input tensor through the residual block and returns the result.
     """
+
     width: int
 
     @nn.compact
-    def __call__(self, 
-                 x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         input_width = x.shape[-1]
 
         # Define layers
         convolution_1 = nn.Conv(self.width, kernel_size=(1, 1))
-        convolution_2 = nn.Conv(self.width, kernel_size=(3, 3), padding='SAME')
-        convolution_3 = nn.Conv(self.width, kernel_size=(3, 3), padding='SAME')
+        convolution_2 = nn.Conv(self.width, kernel_size=(3, 3), padding="SAME")
+        convolution_3 = nn.Conv(self.width, kernel_size=(3, 3), padding="SAME")
         norm = nn.GroupNorm(num_groups=2, epsilon=1e-5, use_bias=False, use_scale=False)
 
         # Residual connection
@@ -76,7 +80,7 @@ class UNetResidualBlock(nn.Module):
         x = convolution_3(x)
 
         return x + residual
-    
+
 
 class UNetDownBlock(nn.Module):
     """
@@ -92,14 +96,16 @@ class UNetDownBlock(nn.Module):
         setup(): Initializes the sequence of residual blocks.
         __call__(x: jnp.ndarray): Processes the input tensor through the down-sampling block and returns the result.
     """
+
     width: int
     block_depth: int
 
     def setup(self):
-        self.residual_blocks = [UNetResidualBlock(self.width) for _ in range(self.block_depth)]
+        self.residual_blocks = [
+            UNetResidualBlock(self.width) for _ in range(self.block_depth)
+        ]
 
-    def __call__(self, 
-                 x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         for block in self.residual_blocks:
             x = block(x)
         x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
@@ -120,18 +126,19 @@ class UNetUpBlock(nn.Module):
         setup(): Initializes the sequence of residual blocks.
         __call__(x: jnp.ndarray, skip: jnp.ndarray): Processes the input tensor and a skip connection from the encoding pathway through the up-sampling block and returns the result.
     """
+
     width: int
     block_depth: int
 
     def setup(self):
-        self.residual_blocks = [UNetResidualBlock(self.width) for _ in range(self.block_depth)]
+        self.residual_blocks = [
+            UNetResidualBlock(self.width) for _ in range(self.block_depth)
+        ]
 
-    def __call__(self, 
-                 x: jnp.ndarray, 
-                 skip: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, skip: jnp.ndarray) -> jnp.ndarray:
         B, H, W, C = x.shape
         upsampled_shape = (B, H * 2, W * 2, C)
-        x = jax.image.resize(x, shape=upsampled_shape, method='bilinear')
+        x = jax.image.resize(x, shape=upsampled_shape, method="bilinear")
         x = jnp.concatenate([x, skip], axis=-1)
         for block in self.residual_blocks:
             x = block(x)
@@ -156,6 +163,7 @@ class UNet(nn.Module):
         setup(): Initializes the U-Net architecture including the sinusoidal embedding layer, down-sampling blocks, residual blocks, and up-sampling blocks.
         __call__(noisy_images: jnp.ndarray, noise_variances: jnp.ndarray): Processes noisy images and their associated noise variances through the U-Net and returns the denoised images.
     """
+
     image_size: Tuple[int, int]
     widths: List[int]
     block_depth: int
@@ -164,20 +172,35 @@ class UNet(nn.Module):
     embed_max_freq: float
 
     def setup(self):
-        self.sinusoidal_embedding = SinusoidalEmbedding(self.embed_dims, self.embed_min_freq, self.embed_max_freq)
-        self.down_blocks = [UNetDownBlock(width, self.block_depth) for width in self.widths[:-1]]
-        self.residual_blocks = [UNetResidualBlock(self.widths[-1]) for _ in range(self.block_depth)]
-        self.up_blocks = [UNetUpBlock(width, self.block_depth) for width in reversed(self.widths[:-1])]
+        self.sinusoidal_embedding = SinusoidalEmbedding(
+            self.embed_dims, self.embed_min_freq, self.embed_max_freq
+        )
+        self.down_blocks = [
+            UNetDownBlock(width, self.block_depth) for width in self.widths[:-1]
+        ]
+        self.residual_blocks = [
+            UNetResidualBlock(self.widths[-1]) for _ in range(self.block_depth)
+        ]
+        self.up_blocks = [
+            UNetUpBlock(width, self.block_depth) for width in reversed(self.widths[:-1])
+        ]
         self.convolution_1 = nn.Conv(self.widths[0], kernel_size=(1, 1))
-        self.convolution_2 = nn.Conv(3, kernel_size=(1, 1), kernel_init=nn.initializers.zeros)
+        self.convolution_2 = nn.Conv(
+            3, kernel_size=(1, 1), kernel_init=nn.initializers.zeros
+        )
 
-    def __call__(self, 
-                 noisy_images: jnp.ndarray, 
-                 noise_variances: jnp.ndarray) -> jnp.ndarray:
-        
+    def __call__(
+        self, noisy_images: jnp.ndarray, noise_variances: jnp.ndarray
+    ) -> jnp.ndarray:
+
         e = self.sinusoidal_embedding(noise_variances)
-        upsampled_shape = (noisy_images.shape[0], self.image_size[0], self.image_size[1], self.embed_dims)
-        e = jax.image.resize(e, upsampled_shape, method='nearest')
+        upsampled_shape = (
+            noisy_images.shape[0],
+            self.image_size[0],
+            self.image_size[1],
+            self.embed_dims,
+        )
+        e = jax.image.resize(e, upsampled_shape, method="nearest")
 
         x = self.convolution_1(noisy_images)
         x = jnp.concatenate([x, e], axis=-1)
@@ -195,8 +218,8 @@ class UNet(nn.Module):
 
         outputs = self.convolution_2(x)
         return outputs
-    
-    
+
+
 class DiffusionModel(nn.Module):
     """
     Implements a diffusion model for image generation using JAX.
@@ -237,11 +260,11 @@ class DiffusionModel(nn.Module):
         images = jax.random.normal(key, input_shape)
 
         # Use your own images
-        dataset = ArrayDataset(images) 
-        dataloader = DataLoader(dataset, 
-                                batch_size=batch_size, 
-                                shuffle=True, 
-                                drop_last=False) 
+        dataset = ArrayDataset(images)
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
+                                drop_last=False)
 
         # Create diffusion model
         diffusion_model = DiffusionModel(image_size, widths, block_depth)
@@ -251,22 +274,23 @@ class DiffusionModel(nn.Module):
 
         # Training on your data
         # Note: saved params are often different from training weights, use the saved params for generation
-        trainer = DiffusionDataParallelTrainer(diffusion_model, 
-                                            input_shape=images.shape, 
-                                            weights_filename='params.pkl', 
+        trainer = DiffusionDataParallelTrainer(diffusion_model,
+                                            input_shape=images.shape,
+                                            weights_filename='params.pkl',
                                             learning_rate=1e-4)
         trainer.train(dataloader, 10, dataloader)
         print(trainer.evaluate(dataloader))
 
         # Generate some samples
         params = trainer.load_params('params.pkl')
-        generated_images = diffusion_model.apply({'params': params}, 
-                                                num_images=5, 
-                                                diffusion_steps=5, 
+        generated_images = diffusion_model.apply({'params': params},
+                                                num_images=5,
+                                                diffusion_steps=5,
                                                 method=diffusion_model.generate)
         print(generated_images.shape)
         ```
     """
+
     image_size: int
     widths: List[int]
     block_depth: int
@@ -277,15 +301,18 @@ class DiffusionModel(nn.Module):
     embed_max_freq: float = 1000.0
 
     def setup(self):
-        self.unet = UNet(image_size=(self.image_size, self.image_size),
-                         widths=self.widths,
-                         block_depth=self.block_depth,
-                         embed_dims=self.embed_dims,
-                         embed_min_freq=self.embed_min_freq,
-                         embed_max_freq=self.embed_max_freq)
+        self.unet = UNet(
+            image_size=(self.image_size, self.image_size),
+            widths=self.widths,
+            block_depth=self.block_depth,
+            embed_dims=self.embed_dims,
+            embed_min_freq=self.embed_min_freq,
+            embed_max_freq=self.embed_max_freq,
+        )
 
-    def diffusion_schedule(self, 
-                           diffusion_times: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def diffusion_schedule(
+        self, diffusion_times: jnp.ndarray
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         start_angle = jnp.arccos(self.max_signal_rate)
         end_angle = jnp.arccos(self.min_signal_rate)
         diffusion_angles = start_angle + diffusion_times * (end_angle - start_angle)
@@ -293,29 +320,34 @@ class DiffusionModel(nn.Module):
         noise_rates = jnp.sin(diffusion_angles)
         return noise_rates, signal_rates
 
-    def denoise(self, 
-                noisy_images: jnp.ndarray, 
-                noise_rates: jnp.ndarray, 
-                signal_rates: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        pred_noises = self.unet(noisy_images, noise_rates ** 2)
+    def denoise(
+        self,
+        noisy_images: jnp.ndarray,
+        noise_rates: jnp.ndarray,
+        signal_rates: jnp.ndarray,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        pred_noises = self.unet(noisy_images, noise_rates**2)
         pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
         return pred_noises, pred_images
 
-    def __call__(self, 
-                 images: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def __call__(self, images: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         key = jax.random.PRNGKey(int(time.time()))
-        noises = jax.random.normal(key, shape=(images.shape[0], self.image_size, self.image_size, 3))
+        noises = jax.random.normal(
+            key, shape=(images.shape[0], self.image_size, self.image_size, 3)
+        )
         batch_size = images.shape[0]
-        diffusion_times = jax.random.uniform(key, shape=(batch_size, 1, 1, 1), minval=0.0, maxval=1.0)
+        diffusion_times = jax.random.uniform(
+            key, shape=(batch_size, 1, 1, 1), minval=0.0, maxval=1.0
+        )
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
         noisy_images = signal_rates * images + noise_rates * noises
         pred_noises, pred_images = self.denoise(noisy_images, noise_rates, signal_rates)
         return pred_noises, pred_images
 
-    def reverse_diffusion(self, 
-                          initial_noise: jnp.ndarray, 
-                          diffusion_steps: int) -> jnp.ndarray:
-        
+    def reverse_diffusion(
+        self, initial_noise: jnp.ndarray, diffusion_steps: int
+    ) -> jnp.ndarray:
+
         num_images = initial_noise.shape[0]
         step_size = 1.0 / diffusion_steps
         next_noisy_images = initial_noise
@@ -323,30 +355,33 @@ class DiffusionModel(nn.Module):
         for step in range(diffusion_steps):
             diffusion_times = jnp.ones((num_images, 1, 1, 1)) - step * step_size
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
-            pred_noises, pred_images = self.denoise(next_noisy_images, noise_rates, signal_rates)
+            pred_noises, pred_images = self.denoise(
+                next_noisy_images, noise_rates, signal_rates
+            )
             next_diffusion_times = diffusion_times - step_size
-            next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
-            next_noisy_images = (next_signal_rates * pred_images + next_noise_rates * pred_noises)
+            next_noise_rates, next_signal_rates = self.diffusion_schedule(
+                next_diffusion_times
+            )
+            next_noisy_images = (
+                next_signal_rates * pred_images + next_noise_rates * pred_noises
+            )
 
         return pred_images
-    
-    def generate(self, 
-                 num_images: int = 1, 
-                 diffusion_steps: int = 20) -> jnp.ndarray:
-        
+
+    def generate(self, num_images: int = 1, diffusion_steps: int = 20) -> jnp.ndarray:
+
         key = jax.random.PRNGKey(int(time.time()))
-        noises = jax.random.normal(key, shape=(num_images, 
-                                               self.image_size, 
-                                               self.image_size, 
-                                               3))
-        
+        noises = jax.random.normal(
+            key, shape=(num_images, self.image_size, self.image_size, 3)
+        )
+
         return self.reverse_diffusion(noises, diffusion_steps)
 
 
 class DiffusionDataParallelTrainer:
     """
     Trainer class using data parallelism with JAX.
-    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs). 
+    This trainer leverages JAX's `pmap` for parallel training across multiple devices (GPUs/TPUs).
     It handles the model training loop, including gradient computation, parameter updates, and evaluation.
 
     Attributes:
@@ -365,12 +400,15 @@ class DiffusionDataParallelTrainer:
         save_params(): Saves the model parameters to a file.
         load_params(filename): Loads model parameters from a file.
     """
-    def __init__(self, 
-                 model: Any, 
-                 input_shape: Tuple[int, ...],
-                 weights_filename: str,
-                 learning_rate: float = 1e-4,
-                 params_path: Optional[str] = None) -> None:
+
+    def __init__(
+        self,
+        model: Any,
+        input_shape: Tuple[int, ...],
+        weights_filename: str,
+        learning_rate: float = 1e-4,
+        params_path: Optional[str] = None,
+    ) -> None:
         self.model = model
         self.params = None
         self.params_path = params_path
@@ -378,50 +416,60 @@ class DiffusionDataParallelTrainer:
         self.best_val_loss = float("inf")
         self.weights_filename = weights_filename
         self.num_devices = jax.local_device_count()
-        self.train_step = jax.pmap(DiffusionDataParallelTrainer.train_step, axis_name='devices')
-        self.evaluation_step = jax.pmap(DiffusionDataParallelTrainer.evaluation_step, axis_name='devices')
+        self.train_step = jax.pmap(
+            DiffusionDataParallelTrainer.train_step, axis_name="devices"
+        )
+        self.evaluation_step = jax.pmap(
+            DiffusionDataParallelTrainer.evaluation_step, axis_name="devices"
+        )
         self.state = self.create_train_state(learning_rate, input_shape)
-        print(f'Number of accelerators: {self.num_devices}')
-    
+        print(f"Number of accelerators: {self.num_devices}")
 
-    def create_train_state(self, 
-                           learning_rate: float, 
-                           input_shape: Tuple[int, ...]) -> Any:
-        
-        rngs = {'params': jax.random.key(0), 'dropout': jax.random.key(1)}
-        params = self.model.init(rngs, jnp.ones(input_shape))['params']
+    def create_train_state(
+        self, learning_rate: float, input_shape: Tuple[int, ...]
+    ) -> Any:
+
+        rngs = {"params": jax.random.key(0), "dropout": jax.random.key(1)}
+        params = self.model.init(rngs, jnp.ones(input_shape))["params"]
 
         if self.params_path is not None:
             params = self.load_params(self.params_path)
 
-        self.num_parameters = sum(param.size for param in jax.tree_util.tree_leaves(params))
-        print(f'Number of parameters: {self.num_parameters}')
-        state = train_state.TrainState.create(apply_fn=self.model.apply, 
-                                              params=params, 
-                                              tx=optax.adam(learning_rate))
+        self.num_parameters = sum(
+            param.size for param in jax.tree_util.tree_leaves(params)
+        )
+        print(f"Number of parameters: {self.num_parameters}")
+        state = train_state.TrainState.create(
+            apply_fn=self.model.apply, params=params, tx=optax.adam(learning_rate)
+        )
         return jax.device_put_replicated(state, jax.local_devices())
-    
+
     @staticmethod
-    def train_step(state: Any, 
-                   images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
+    def train_step(state: Any, images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+
         def loss_fn(params):
             key = jax.random.PRNGKey(int(time.time()))
             noises = jax.random.normal(key, shape=images.shape)
-            pred_noises, pred_images = state.apply_fn({'params': params}, 
-                                      images,
-                                      rngs={'dropout': jax.random.PRNGKey(int(time.time()))})
-            return jnp.mean(jnp.square(pred_noises - noises)) + jnp.mean(jnp.square(pred_images - images))
-        
+            pred_noises, pred_images = state.apply_fn(
+                {"params": params},
+                images,
+                rngs={"dropout": jax.random.PRNGKey(int(time.time()))},
+            )
+            return jnp.mean(jnp.square(pred_noises - noises)) + jnp.mean(
+                jnp.square(pred_images - images)
+            )
+
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
         return state, loss
 
-    def train(self, 
-              train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]], 
-              num_epochs: int, 
-              val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None) -> None:
-        
+    def train(
+        self,
+        train_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]],
+        num_epochs: int,
+        val_loader: Optional[Iterable[Tuple[jnp.ndarray, jnp.ndarray]]] = None,
+    ) -> None:
+
         for epoch in range(num_epochs):
             total_loss = 0.0
             count = 0
@@ -429,72 +477,82 @@ class DiffusionDataParallelTrainer:
                 images = images[0] if len(images) == 1 else images
                 batch_size = images.shape[0]
                 batch_size_per_device = batch_size // self.num_devices
-                images = images.reshape((self.num_devices, 
-                                         batch_size_per_device, 
-                                         images.shape[1], 
-                                         images.shape[2], 
-                                         images.shape[3]))
-                self.state, loss = self.train_step(state=self.state, 
-                                                   images=images)
+                images = images.reshape(
+                    (
+                        self.num_devices,
+                        batch_size_per_device,
+                        images.shape[1],
+                        images.shape[2],
+                        images.shape[3],
+                    )
+                )
+                self.state, loss = self.train_step(state=self.state, images=images)
                 total_loss += jnp.mean(loss)
                 count += 1
-            
+
             mean_loss = total_loss / count
-            print(f'Epoch {epoch+1}, Train Loss: {mean_loss}')
+            print(f"Epoch {epoch+1}, Train Loss: {mean_loss}")
 
             if val_loader is not None:
                 val_loss = self.evaluate(val_loader)
-                print(f'Epoch {epoch+1}, Val Loss: {val_loss}')
+                print(f"Epoch {epoch+1}, Val Loss: {val_loss}")
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                 print("New best validation score achieved, saving model...")
                 self.save_params()
-        return 
-    
+        return
+
     @staticmethod
-    def evaluation_step(state: Any, 
-                        images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
-        
+    def evaluation_step(state: Any, images: jnp.ndarray) -> Tuple[Any, jnp.ndarray]:
+
         key = jax.random.PRNGKey(int(time.time()))
         noises = jax.random.normal(key, shape=images.shape)
-        pred_noises, pred_images = state.apply_fn({'params': state.params}, 
-                                                  images,  
-                                                  rngs={'dropout': jax.random.PRNGKey(int(time.time()))})
-        return jnp.mean(jnp.square(pred_noises - noises)) + jnp.mean(jnp.square(pred_images - images))
+        pred_noises, pred_images = state.apply_fn(
+            {"params": state.params},
+            images,
+            rngs={"dropout": jax.random.PRNGKey(int(time.time()))},
+        )
+        return jnp.mean(jnp.square(pred_noises - noises)) + jnp.mean(
+            jnp.square(pred_images - images)
+        )
 
-    def evaluate(self, 
-                 test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
-        
+    def evaluate(self, test_loader: Iterable[Tuple[jnp.ndarray, jnp.ndarray]]) -> None:
+
         total_loss = 0.0
         count = 0
         for images in test_loader:
             images = images[0] if len(images) == 1 else images
             batch_size = images.shape[0]
             batch_size_per_device = batch_size // self.num_devices
-            images = images.reshape((self.num_devices, 
-                                        batch_size_per_device, 
-                                        images.shape[1], 
-                                        images.shape[2], 
-                                        images.shape[3]))
+            images = images.reshape(
+                (
+                    self.num_devices,
+                    batch_size_per_device,
+                    images.shape[1],
+                    images.shape[2],
+                    images.shape[3],
+                )
+            )
             loss = self.evaluation_step(self.state, images)
             total_loss += jnp.mean(loss)
             count += 1
-        
+
         mean_loss = total_loss / count
         return mean_loss
-    
+
     def get_ema_weights(self, params, ema=0.999):
         def func(x):
             return x * ema + (1 - ema) * x
+
         return jax.tree_util.tree_map(func, params)
 
     def save_params(self) -> None:
         self.params = flax.jax_utils.unreplicate(self.state.params)
         self.params = self.get_ema_weights(self.params)
-        with open(self.weights_filename, 'wb') as f:
+        with open(self.weights_filename, "wb") as f:
             f.write(flax.serialization.to_bytes(self.params))
 
     def load_params(self, filename: str):
-        with open(filename, 'rb') as f:
+        with open(filename, "rb") as f:
             self.params = flax.serialization.from_bytes(self.params, f.read())
         return self.params
