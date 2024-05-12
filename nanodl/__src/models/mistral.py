@@ -18,11 +18,6 @@ class RotaryPositionalEncoding:
     Attributes:
         dim_model (int): The dimensionality of the model embeddings.
 
-    Methods:
-        _update_cos_sin_tables(x, seq_dimension): Updates cosine and sine tables based on the sequence length.
-        rotate_half(x): Rotates the last half of the dimensions of x by swapping them and changing signs to simulate a 90-degree rotation.
-        apply_rotary_pos_emb(x, cos, sin): Applies the rotary positional encoding to the input embeddings.
-        __call__(q, k): Applies rotary positional encoding to query and key tensors in attention mechanisms.
     """
 
     def __init__(self, dim_model: int):
@@ -81,13 +76,6 @@ class GroupedRotaryShiftedWindowMultiHeadAttention(nn.Module):
         window_size (int): Size of each window for processing local context.
         shift_size (int): Number of positions to shift the window at each layer to capture global context.
 
-    Methods:
-        setup(): Initializes the projections for query, key, value, and output, along with the rotary positional encoder.
-        __call__(inputs, context, mask): Processes the input and context tensors through the grouped rotary and shifted window multi-head attention mechanism.
-        process_group(query, key, value, mask): Processes a single group of heads through rotary positional encoding, shifted window partitioning, and attention.
-        window_partition(x): Partitions the input tensor into windows of a specified size.
-        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors within each window.
-        causal_mask(shape): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism within windows.
     """
 
     hidden_dim: int  # Output dimension
@@ -235,9 +223,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     hidden_dim: int
@@ -271,9 +256,6 @@ class MistralDecoderBlock(nn.Module):
         window_size (int): Size of each window for processing local context.
         shift_size (int): Number of positions to shift the window at each layer to capture global context.
 
-    Methods:
-        setup(): Initializes the components of the Mistral decoder block.
-        __call__(x, training): Processes the input tensor through the Mistral decoder block.
     """
 
     hidden_dim: int
@@ -347,9 +329,6 @@ class MistralDecoder(nn.Module):
         window_size (int): Window size used in grouped rotary shifted window multi-head attention.
         shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
 
-    Methods:
-        setup(): Initializes the components of the Mistral decoder.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral decoder.
     """
 
     num_layers: int
@@ -423,8 +402,6 @@ class Mistral(nn.Module):
         shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
 
     Methods:
-        setup(): Initializes the Mistral model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the Mistral model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 
@@ -666,19 +643,6 @@ class SparseMixtureOfExperts(nn.Module):
         num_experts (int): Number of experts.
         top_k (int): Number of top experts to use for each input instance.
 
-    Methods:
-        setup(): Initializes the experts, the gating mechanism, and the final dense layer.
-
-        __call__(X: jnp.ndarray) -> jnp.ndarray:
-            Performs a forward pass through the Mixture of Experts layer.
-
-            Args:
-                X (jnp.ndarray): Input tensor of shape (batch_size, seq_length, input_dim).
-
-            Returns:
-                jnp.ndarray: Output tensor after processing through the MoE layer. The output
-                tensor has the same batch and sequence length dimensions as the input tensor,
-                but the last dimension is equal to num_outputs.
     """
 
     num_hiddens: int
@@ -730,9 +694,6 @@ class MixtralDecoderBlock(nn.Module):
         window_size (int): Size of each window for processing local context.
         shift_size (int): Number of positions to shift the window at each layer to capture global context.
 
-    Methods:
-        setup(): Initializes the components of the Mixtral decoder block.
-        __call__(x, training): Processes the input tensor through the Mixtral decoder block.
     """
 
     hidden_dim: int
@@ -808,9 +769,6 @@ class MixtralDecoder(nn.Module):
         window_size (int): Window size used in grouped rotary shifted window multi-head attention.
         shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
 
-    Methods:
-        setup(): Initializes the components of the Mixtral decoder.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral decoder.
     """
 
     num_layers: int
@@ -884,8 +842,6 @@ class Mixtral(nn.Module):
         shift_size (int): Shift size used in grouped rotary shifted window multi-head attention.
 
     Methods:
-        setup(): Initializes the Mixtral model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the Mixtral model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 

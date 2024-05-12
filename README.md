@@ -12,7 +12,7 @@ N/B: Codes are implemented pedagogically at the expense of repetition.
 Each model is purposefully contained in a file without inter-file dependencies. 
 
 ## Overview
-Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
+Developing and training transformer-based models is typically resource-intensive and time-consuming and AI/ML experts frequently need to build smaller-scale versions of these models for specific problems. Jax, a low-resource yet powerful framework, accelerates the development of neural networks and abstracts distributed training, but existing resources for transformer development in Jax are limited. NanoDL addresses this challenge with the following features:
 
 - A wide array of blocks and layers, facilitating the creation of customised transformer models from scratch.
 - An extensive selection of models like Gemma, LlaMa3, Mistral, GPT3, GPT4 (inferred), T5, Whisper, ViT, Mixers, CLIP etc.
@@ -57,9 +57,10 @@ We provide various example usages of the nanodl API.
 
 ```py
 import jax
+import nanodl
 import jax.numpy as jnp
 from nanodl import ArrayDataset, DataLoader
-from nanodl import GPT4, GPTDataParallelTrainer, Tokenizer
+from nanodl import GPT4, GPTDataParallelTrainer
 
 # Preparing your dataset
 batch_size = 8
@@ -67,17 +68,19 @@ max_length = 50
 vocab_size = 1000
 
 # Create random data
-data = nanodl.uniform(shape=(batch, max_length))
+data = nanodl.uniform(
+    shape=(batch_size, max_length), 
+    minval=0, maxval=vocab_size-1
+    ).astype(jnp.int32)
 
 # Shift to create next-token prediction dataset
 dummy_inputs, dummy_targets = data[:, :-1], data[:, 1:]
 
 # Create dataset and dataloader
 dataset = ArrayDataset(dummy_inputs, dummy_targets)
-dataloader = DataLoader(dataset,
-                        batch_size=batch_size,
-                        shuffle=True,
-                        drop_last=False)
+dataloader = DataLoader(
+    dataset, batch_size=batch_size, shuffle=True, drop_last=False
+    )
 
 # model parameters
 hyperparams = {
@@ -96,29 +99,32 @@ hyperparams = {
 # Inferred GPT4 model 
 model = GPT4(**hyperparams)
 
-trainer = GPTDataParallelTrainer(model,
-                                 dummy_inputs.shape,
-                                 'params.pkl')
+trainer = GPTDataParallelTrainer(
+    model, dummy_inputs.shape, 'params.pkl'
+    )
 
-trainer.train(train_loader=dataloader,
-              num_epochs=100,
-              val_loader=dataloader) # use actual val data
+trainer.train(
+    train_loader=dataloader, num_epochs=100, val_loader=dataloader
+    ) # use actual val data
 
 # Generating from a start token
 start_tokens = jnp.array([[123, 456]])
 
 # Remember to load the trained parameters 
 params = trainer.load_params('params.pkl')
-outputs = model.apply({'params': params},
-                      start_tokens,
-                      rngs={'dropout': nanodl.time_rng_key()}, 
-                      method=model.generate)
+
+outputs = model.apply(
+    {'params': params}, 
+    start_tokens,
+    rngs={'dropout': nanodl.time_rng_key()}, 
+    method=model.generate
+    )
 ```
 
 Vision example
 
 ```py
-import jax
+import nanodl
 import jax.numpy as jnp
 from nanodl import ArrayDataset, DataLoader
 from nanodl import DiffusionModel, DiffusionDataParallelTrainer
@@ -143,7 +149,7 @@ trainer = DiffusionDataParallelTrainer(diffusion_model,
                                        weights_filename='params.pkl', 
                                        learning_rate=1e-4)
 
-trainer.train(dataloader, 10, dataloader) # use actual val data
+trainer.train(dataloader, 10)
 
 # Generate some samples: Each model is a Flax.linen module
 # Use as you normally would
@@ -205,17 +211,15 @@ params = trainer.load_params('params.pkl')
 
 # for more than one sample, often use model.generate_batch
 transcripts = model.apply({'params': params}, 
-                          dummy_inputs[:1], 
-                          rngs=rngs, 
+                          dummy_inputs[:1],
                           method=model.generate)
 ```
 
 Reward Model example for RLHF
 
 ```py
-import jax
+import nanodl
 import jax.numpy as jnp
-from nanodl import time_rng_key
 from nanodl import ArrayDataset, DataLoader
 from nanodl import Mistral, RewardModel, RewardDataParallelTrainer
 
@@ -266,7 +270,7 @@ rewards = reward_model.apply({'params': params},
 PCA example
 
 ```py
-import jax
+import nanodl
 from nanodl import PCA
 
 # Use actual data

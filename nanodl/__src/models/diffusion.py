@@ -20,9 +20,6 @@ class SinusoidalEmbedding(nn.Module):
         embedding_min_frequency (float): The minimum frequency used in the sinusoidal embedding.
         embedding_max_frequency (float): The maximum frequency used in the sinusoidal embedding.
 
-    Methods:
-        setup(): Initializes the layer by computing the angular speeds for the sinusoidal functions based on the specified frequency range.
-        __call__(x: jnp.ndarray): Generates the sinusoidal embeddings for the input positions.
     """
 
     embedding_dims: int
@@ -53,8 +50,6 @@ class UNetResidualBlock(nn.Module):
     Attributes:
         width (int): The number of output channels for the convolutional layers within the block.
 
-    Methods:
-        __call__(x: jnp.ndarray): Processes the input tensor through the residual block and returns the result.
     """
 
     width: int
@@ -92,9 +87,6 @@ class UNetDownBlock(nn.Module):
         width (int): The number of output channels for the convolutional layers within the block.
         block_depth (int): The number of residual blocks to include in the down-sampling block.
 
-    Methods:
-        setup(): Initializes the sequence of residual blocks.
-        __call__(x: jnp.ndarray): Processes the input tensor through the down-sampling block and returns the result.
     """
 
     width: int
@@ -122,9 +114,6 @@ class UNetUpBlock(nn.Module):
         width (int): The number of output channels for the convolutional layers within the block.
         block_depth (int): The number of residual blocks to include in the up-sampling block.
 
-    Methods:
-        setup(): Initializes the sequence of residual blocks.
-        __call__(x: jnp.ndarray, skip: jnp.ndarray): Processes the input tensor and a skip connection from the encoding pathway through the up-sampling block and returns the result.
     """
 
     width: int
@@ -159,9 +148,6 @@ class UNet(nn.Module):
         embed_min_freq (float): The minimum frequency for the sinusoidal embeddings.
         embed_max_freq (float): The maximum frequency for the sinusoidal embeddings.
 
-    Methods:
-        setup(): Initializes the U-Net architecture including the sinusoidal embedding layer, down-sampling blocks, residual blocks, and up-sampling blocks.
-        __call__(noisy_images: jnp.ndarray, noise_variances: jnp.ndarray): Processes noisy images and their associated noise variances through the U-Net and returns the denoised images.
     """
 
     image_size: Tuple[int, int]
@@ -237,10 +223,8 @@ class DiffusionModel(nn.Module):
         embed_max_freq (float): The maximum frequency for the sinusoidal embeddings.
 
     Methods:
-        setup(): Initializes the diffusion model including the U-Net architecture.
         diffusion_schedule(diffusion_times: jnp.ndarray): Computes the noise and signal rates for given diffusion times.
         denoise(noisy_images: jnp.ndarray, noise_rates: jnp.ndarray, signal_rates: jnp.ndarray): Denoises images given their noise and signal rates.
-        __call__(images: jnp.ndarray): Applies the diffusion process to a batch of images.
         reverse_diffusion(initial_noise: jnp.ndarray, diffusion_steps: int): Reverses the diffusion process to generate images from noise.
         generate(num_images: int, diffusion_steps: int): Generates images by reversing the diffusion process from random noise.
 

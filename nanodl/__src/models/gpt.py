@@ -19,10 +19,6 @@ class SelfMultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
-        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
-        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int
@@ -92,9 +88,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -148,10 +141,6 @@ class GPT3Block(nn.Module):
         feedforward_dim (int): Dimension of the feedforward layer.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the GPT-3 block, including attention mechanisms, feedforward network, and normalization layers.
-        causal_mask(batch_size, destination_dim, source_dim): Creates a causal mask to ensure that predictions for a position can depend only on known outputs at earlier positions.
-        __call__(x, mask=None, training=False): Defines the computation performed at every call of the GPT-3 block.
     """
 
     hidden_dim: int
@@ -228,9 +217,6 @@ class GPT3Decoder(nn.Module):
         vocab_size (int): The size of the vocabulary.
         embed_dim (int): The dimensionality of the token embeddings.
 
-    Methods:
-        setup(): Initializes the components of the GPT-3 decoder including the embedding layer, GPT-3 blocks, and the output layer.
-        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the GPT-3 decoder, generating predictions for the next token in the sequence.
     """
 
     num_layers: int
@@ -296,8 +282,6 @@ class GPT3(nn.Module):
         end_token (int): The token that indicates the end of a generated sequence.
 
     Methods:
-        setup(): Initializes the GPT-3 model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the GPT-3 model, generating predictions for the next token in the sequence.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively, starting from an optional initial sequence.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 
@@ -518,19 +502,6 @@ class SparseMixtureOfExperts(nn.Module):
         num_experts (int): Number of experts.
         top_k (int): Number of top experts to use for each input instance.
 
-    Methods:
-        setup(): Initializes the experts, the gating mechanism, and the final dense layer.
-
-        __call__(X: jnp.ndarray) -> jnp.ndarray:
-            Performs a forward pass through the Mixture of Experts layer.
-
-            Args:
-                X (jnp.ndarray): Input tensor of shape (batch_size, seq_length, input_dim).
-
-            Returns:
-                jnp.ndarray: Output tensor after processing through the MoE layer. The output
-                tensor has the same batch and sequence length dimensions as the input tensor,
-                but the last dimension is equal to num_outputs.
     """
 
     num_hiddens: int
@@ -585,10 +556,6 @@ class GPT4Block(nn.Module):
         num_experts (int): Number of experts in the sparse mixture of experts layer.
         top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer.
 
-    Methods:
-        setup(): Initializes the components of the GPT-4 block.
-        causal_mask(batch_size, destination_dim, source_dim): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism.
-        __call__(x, mask, training): Processes the input tensor through the GPT-4 block.
     """
 
     hidden_dim: int
@@ -672,9 +639,6 @@ class GPT4Decoder(nn.Module):
         num_experts (int): Number of experts in the sparse mixture of experts layer in each GPT-4 block.
         top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer in each GPT-4 block.
 
-    Methods:
-        setup(): Initializes the components of the GPT-4 decoder.
-        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the GPT-4 decoder.
     """
 
     num_layers: int
@@ -749,8 +713,6 @@ class GPT4(nn.Module):
         top_k (int): Number of experts to be activated for each input in the sparse mixture of experts layer.
 
     Methods:
-        setup(): Initializes the GPT-4 model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the GPT-4 model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 

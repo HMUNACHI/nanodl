@@ -15,9 +15,6 @@ class SpeechEmbedding(nn.Module):
 
     This layer applies two convolutional operations followed by GELU activations to the input audio signals. The first convolution maintains the sequence length, while the second halves it. Additionally, it adds sinusoidal embeddings to capture positional information within the audio sequence.
 
-    Methods:
-        __call__(x): Processes the input audio tensor through the convolutional layers and adds sinusoidal embeddings.
-        sinusoidal_embedding(x, max_position): Generates sinusoidal embeddings based on the sequence length and hidden dimension of the input.
     """
 
     @nn.compact
@@ -51,9 +48,6 @@ class PositionalEncoding(nn.Module):
         num_embeddings (int): The maximum number of positions for which to generate positional encodings.
         features (int): The dimensionality of the embeddings/positional encodings.
 
-    Methods:
-        setup(): Initializes the positional encoding matrix based on the provided attributes.
-        __call__(x: jnp.ndarray): Adds positional encodings to the input embeddings.
     """
 
     num_embeddings: int
@@ -82,6 +76,7 @@ class PositionalEncoding(nn.Module):
 class TokenAndPositionEmbedding(nn.Module):
     """
     Token and Position Embedding.
+
     Args:
         max_len (int): Maximum sequence length.
         vocab_size (int): Vocabulary size.
@@ -125,10 +120,6 @@ class MultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
-        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
-        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int  # Output dimension
@@ -211,9 +202,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -261,9 +249,6 @@ class WhisperSpeechEncoderBlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the WhisperSpeechEncoderBlock.
-        __call__(x, mask, training): Processes the input tensor through the encoder block.
     """
 
     hidden_dim: int
@@ -303,9 +288,6 @@ class WhisperSpeechEncoder(nn.Module):
         feedforward_dim (int): Dimensionality of the feedforward network within each encoder block.
         dropout (float): Dropout rate used for regularization.
 
-    Methods:
-        setup(): Initializes the components of the WhisperSpeechEncoder.
-        __call__(x, mask, training): Processes the input audio tensor through the encoder, returning encoded features and attention maps.
     """
 
     num_layers: int
@@ -348,9 +330,6 @@ class WhisperTextDecoderBlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the Transformer decoder block.
-        __call__(x, context, training): Processes the input tensor through the decoder block.
     """
 
     hidden_dim: int
@@ -421,9 +400,6 @@ class WhisperTextDecoder(nn.Module):
         embed_dim (float): Dimensionality of the token embeddings.
         learned_position (bool): Indicates if positional embeddings are learned or static.
 
-    Methods:
-        setup(): Initializes the components of the Transformer decoder.
-        __call__(x, context, training): Processes the input tensor through the decoder.
     """
 
     num_layers: int
@@ -487,8 +463,6 @@ class Whisper(nn.Module):
         end_token (int): Token that indicates the end of a generated sequence.
 
     Methods:
-        setup(): Initializes the Whisper model including both the encoder and decoder components.
-        __call__(x, y, training): Processes the input audio tensor through the Whisper model, generating textual predictions.
         generate(x, temperature, deterministic): Generates textual output from input audio sequences.
 
     Whisper uses an encoder-decoder Transformer (Vaswani et al., 2017) as this, All  audio is re-sampled to 16,000 Hz, and an 80-channel logmagnitude Mel spectrogram representation is computed on

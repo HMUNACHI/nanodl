@@ -19,9 +19,6 @@ class PatchEmbedding(nn.Module):
         patch_size (tuple): Size (height, width) of the patches to extract from input images.
         embed_dim (int): Dimension of the embeddings for the patches.
 
-    Methods:
-        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
-        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
     """
 
     patch_size: Tuple[int, int]
@@ -63,8 +60,6 @@ class MixerBlock(nn.Module):
 
     The Mixer block applies a two-step mixing process: the first step mixes per-location features across the channel dimension, and the second step mixes per-channel features across spatial locations. It aims to capture both channel-wise and spatial interactions within the input.
 
-    Methods:
-        __call__(x): Processes the input tensor through the Mixer block.
     """
 
     @nn.compact
@@ -94,9 +89,6 @@ class MixerEncoder(nn.Module):
         feedforward_dim (int): Dimensionality of the feedforward network within the MixerBlock.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the MixerEncoder.
-        __call__(x, training): Processes the input tensor through the encoder.
     """
 
     patch_size: Tuple[int, int]
@@ -136,10 +128,6 @@ class Mixer(nn.Module):
         feedforward_dim (int): Dimensionality of the feedforward network within the MixerBlock.
         dropout (float): Dropout rate for regularization.
         n_outputs (int): Number of output classes.
-
-    Methods:
-        setup(): Initializes the components of the Mixer model.
-        __call__(x, training): Processes the input tensor through the model and produces class logits.
 
     MLP Mixers are a recent architectural innovation in the field of deep learning, introduced to address the limitations of traditional Convolutional Neural Networks (CNNs) and Transformers.
     The motivation behind MLP Mixers arises from the need to handle diverse data types and leverage multi-modal information efficiently. Unlike transformers that rely on self-attention mechanisms,

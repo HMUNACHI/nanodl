@@ -19,9 +19,6 @@ class PositionalEncoding(nn.Module):
         num_embeddings (int): The maximum number of positions for which to generate positional encodings.
         features (int): The dimensionality of the embeddings/positional encodings.
 
-    Methods:
-        setup(): Initializes the positional encoding matrix based on the provided attributes.
-        __call__(x: jnp.ndarray): Adds positional encodings to the input embeddings.
     """
 
     num_embeddings: int
@@ -59,9 +56,6 @@ class TokenAndPositionEmbedding(nn.Module):
         embed_dim (int): Dimension of the embeddings.
         learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
 
-    Methods:
-        setup(): Initializes token and positional embeddings.
-        __call__(x: jnp.ndarray): Applies token embeddings and adds positional information to the input sequence.
     """
 
     max_len: int
@@ -101,10 +95,6 @@ class MultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
-        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
-        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int
@@ -186,9 +176,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -216,8 +203,6 @@ class AddNorm(nn.Module):
     Attributes:
         dropout (float): Dropout rate for the residual connection.
 
-    Methods:
-        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
 
     dropout: int
@@ -241,9 +226,6 @@ class TransformerEncoderBlock(nn.Module):
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
 
-    Methods:
-        setup(): Initializes the attention, feed-forward network, and normalization layers.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
 
     hidden_dim: int
@@ -286,9 +268,6 @@ class TransformerEncoder(nn.Module):
         embed_dim (int): Dimension of the embeddings.
         learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
 
-    Methods:
-        setup(): Initializes the embedding layer and the encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the transformer encoder.
     """
 
     num_layers: int
@@ -336,9 +315,6 @@ class TransformerDecoderBlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the Transformer decoder block.
-        __call__(x, context, training): Processes the input tensor through the decoder block.
     """
 
     hidden_dim: int
@@ -409,9 +385,6 @@ class TransformerDecoder(nn.Module):
         embed_dim (float): Dimensionality of the token embeddings.
         learned_position (bool): Indicates if positional embeddings are learned or static.
 
-    Methods:
-        setup(): Initializes the components of the Transformer decoder.
-        __call__(x, context, training): Processes the input tensor through the decoder.
     """
 
     num_layers: int
@@ -475,8 +448,6 @@ class Transformer(nn.Module):
             end_token (int): Token that indicates the end of a generated sequence.
 
         Methods:
-            setup(): Initializes the Transformer model including both the encoder and decoder components.
-            __call__(x, y, training): Processes the input tensor through the Transformer model, generating predictions.
             generate(x, temperature, deterministic): Generates output sequences from input sequences.
             generate_batch(x, temperature, deterministic): Generates output sequences for a batch of input sequences.
 
@@ -568,7 +539,7 @@ class Transformer(nn.Module):
                                 rngs={'dropout': jax.random.PRNGKey(2)},
                                 method=model.generate)
             print(outputs)
-    ```
+            ```
     """
 
     num_layers: int

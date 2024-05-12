@@ -19,9 +19,6 @@ class PatchEmbedding(nn.Module):
         patch_size (tuple): Size (height, width) of the patches to extract from input images.
         embed_dim (int): Dimension of the embeddings for the patches.
 
-    Methods:
-        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
-        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
     """
 
     patch_size: Tuple[int, int]
@@ -67,10 +64,6 @@ class SelfMultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
-        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
-        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int  # Output dimension
@@ -140,9 +133,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -169,23 +159,12 @@ class AddNorm(nn.Module):
     Attributes:
         dropout (float): Dropout rate for the residual connection.
 
-    Methods:
-        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
 
     dropout: int
 
     @nn.compact
     def __call__(self, X: jnp.ndarray, Y: jnp.ndarray, training=False) -> jnp.ndarray:
-        """
-        Apply AddNorm to input tensors.
-        Args:
-            X (jnp.ndarray): Input tensor X.
-            Y (jnp.ndarray): Input tensor Y.
-            training (bool): Training mode.
-        Returns:
-            jnp.ndarray: Output tensor after applying AddNorm.
-        """
         return nn.LayerNorm()(
             nn.Dropout(self.dropout)(Y, deterministic=not training) + X
         )
@@ -203,9 +182,6 @@ class ViTBlock(nn.Module):
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
 
-    Methods:
-        setup(): Initializes the attention, feed-forward network, and normalization layers.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
 
     hidden_dim: int
@@ -246,9 +222,6 @@ class ViTEncoder(nn.Module):
         feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the patch embedding and encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
 
     patch_size: Tuple[int, int]
@@ -293,10 +266,6 @@ class ViT(nn.Module):
         num_heads (int): Number of attention heads in the self-attention mechanism.
         feedforward_dim (int): Dimensionality of the feedforward network within each Transformer encoder layer.
         dropout (float): Dropout rate for regularization.
-
-    Methods:
-        setup(): Initializes the components of the ViTEncoder.
-        __call__(x, mask, training): Processes the input tensor through the encoder, returning encoded features and attention maps.
 
     Vision Transformers, or ViTs, have emerged as a groundbreaking architectural paradigm in computer vision and deep learning.
     The motivation behind Vision Transformers lies in the desire to extend the success of transformers,

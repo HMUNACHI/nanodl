@@ -110,7 +110,7 @@ class DataLoader:
         self.shuffle = shuffle
         self.drop_last = drop_last
 
-        self.keys = PRNGSequence(seed=Config.default().global_seed)
+        self.keys = __PRNGSequence(seed=Config.default().global_seed)
         self.data_len = len(dataset)  # Length of the dataset
         self.indices = jnp.arange(self.data_len)  # available indices in the dataset
         self.pose = 0  # record the current position in the dataset
@@ -162,7 +162,7 @@ class Config:
         return cls(rng_reserve_size=1, global_seed=42)
 
 
-class PRNGSequence(Iterator[jax.random.PRNGKey]):
+class __PRNGSequence(Iterator[jax.random.PRNGKey]):
     """
     An Iterator of Jax PRNGKey (minimal version of `haiku.PRNGSequence`).
 

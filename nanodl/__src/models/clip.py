@@ -18,10 +18,6 @@ class PositionalEncoding(nn.Module):
     Attributes:
         num_embeddings (int): The maximum number of positions for which to generate positional encodings.
         features (int): The dimensionality of the embeddings/positional encodings.
-
-    Methods:
-        setup(): Initializes the positional encoding matrix based on the provided attributes.
-        __call__(x: jnp.ndarray): Adds positional encodings to the input embeddings.
     """
 
     num_embeddings: int
@@ -58,10 +54,6 @@ class TokenAndPositionEmbedding(nn.Module):
         vocab_size (int): Size of the vocabulary.
         embed_dim (int): Dimension of the embeddings.
         learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
-
-    Methods:
-        setup(): Initializes token and positional embeddings.
-        __call__(x: jnp.ndarray): Applies token embeddings and adds positional information to the input sequence.
     """
 
     max_len: int
@@ -100,11 +92,6 @@ class SelfMultiHeadAttention(nn.Module):
     Attributes:
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
-
-    Methods:
-        setup(): Initializes projection matrices for queries, keys, values, and the output projection.
-        __call__(inputs: jnp.ndarray, mask: jnp.ndarray = None): Processes the input tensor through the multi-head self-attention mechanism.
-        attention_function(query, key, value, mask=None): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int
@@ -172,10 +159,6 @@ class PositionWiseFFN(nn.Module):
     Attributes:
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
-
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -201,9 +184,6 @@ class AddNorm(nn.Module):
 
     Attributes:
         dropout (float): Dropout rate for the residual connection.
-
-    Methods:
-        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
 
     dropout: int
@@ -226,10 +206,6 @@ class EncoderBlock(nn.Module):
         num_heads (int): Number of attention heads.
         feedforward_dim (int): Dimension of the feed-forward network.
         dropout (float): Dropout rate.
-
-    Methods:
-        setup(): Initializes the attention, feed-forward network, and normalization layers.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the encoder block.
     """
 
     hidden_dim: int
@@ -271,10 +247,6 @@ class TextEncoder(nn.Module):
         vocab_size (int): Size of the vocabulary.
         embed_dim (int): Dimension of the embeddings.
         learned_position (bool): Flag to use learned positional embeddings instead of fixed positional encodings.
-
-    Methods:
-        setup(): Initializes the embedding layer and the encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input through the transformer encoder.
     """
 
     num_layers: int
@@ -319,9 +291,6 @@ class PatchEmbedding(nn.Module):
         patch_size (tuple): Size (height, width) of the patches to extract from input images.
         embed_dim (int): Dimension of the embeddings for the patches.
 
-    Methods:
-        __call__(x: jnp.ndarray): Extracts patches from the input images and applies patch embedding.
-        extract_patches(images: jnp.ndarray): Extracts and flattens patches from input images.
     """
 
     patch_size: Tuple[int, int]
@@ -371,9 +340,6 @@ class ImageEncoder(nn.Module):
         feedforward_dim (int): Dimension of the feed-forward network in the transformer encoder.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the patch embedding and encoder blocks.
-        __call__(x: jnp.ndarray, mask: jnp.ndarray = None, training: bool = False): Processes the input images through the vision transformer encoder.
     """
 
     patch_size: Tuple[int, int]
@@ -429,8 +395,6 @@ class CLIP(nn.Module):
     - num_layers_images (int): Number of transformer layers for image encoding.
 
     Methods:
-    - setup(): Initializes the model components and parameters.
-    - __call__(texts, images, training): Computes embeddings for text and images.
     - get_attention_maps(texts, images): Computes attention maps for text and images.
     - encode_text(texts): Encodes text data using the text encoder.
     - encode_image(images): Encodes image data using the image encoder.

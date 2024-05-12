@@ -19,12 +19,12 @@ def batch_cosine_similarities(
         jnp.ndarray: Array of cosine similarity scores of shape (N,).
 
     Example usage:
-    ```
+        ```
         >>> source = jnp.array([1, 0, 0])
         >>> candidates = jnp.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
         >>> similarities = batch_cosine_similarities(source, candidates)
         >>> print(similarities)
-    ```
+        ```
     """
     dot_products = jnp.einsum("ij,j->i", candidates, source)
     norm_source = jnp.sqrt(jnp.einsum("i,i->", source, source))
@@ -45,12 +45,12 @@ def batch_pearsonr(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
         jnp.ndarray: Array of Pearson correlation coefficients of shape (N,).
 
     Example usage:
-    ```
+        ```
         >>> x = jnp.array([[1, 2, 3], [4, 5, 6]])
         >>> y = jnp.array([[1, 5, 7], [2, 6, 8]])
         >>> correlations = batch_pearsonr(x, y)
         >>> print(correlations)
-    ```
+        ```
     """
     x = jnp.asarray(x).T
     y = jnp.asarray(y).T
@@ -76,11 +76,11 @@ def classification_scores(labels: jnp.ndarray, preds: jnp.ndarray) -> jnp.ndarra
         jnp.ndarray: Array containing accuracy, precision, recall, and F1-score.
 
     Example usage:
-    ```
+        ```
         >>> labels = jnp.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
         >>> preds = jnp.array([1, 1, 1, 0, 1, 0, 1, 0, 0, 0])
         >>> print(classification_scores(labels, preds))
-    ```
+        ```
     """
     true_positives = jnp.sum(jnp.logical_and(preds == 1, labels == 1))
     true_negatives = jnp.sum(jnp.logical_and(preds == 0, labels == 0))
@@ -100,14 +100,14 @@ def mean_reciprocal_rank(predictions: jnp.ndarray) -> float:
     Calculate the Mean Reciprocal Rank (MRR) for a list of ranked predictions using JAX.
 
     Example usage:
-    ```
+        ```
         predictions = jnp.array([
             [0, 1, 2],  # "correct" prediction at index 0
             [1, 0, 2],  # "correct" prediction at index 1
             [2, 1, 0]   # "correct" prediction at index 2
         ])
         mrr_score = mean_reciprocal_rank(predictions)
-    ```
+        ```
 
     Args:
         predictions (jnp.ndarray): 2D array where each row contains ranked predictions
@@ -135,12 +135,12 @@ def jaccard(sequence1: List, sequence2: List) -> float:
         float: Jaccard similarity score.
 
     Example usage:
-    ```py
+        ```py
         >>> sequence1 = [1, 2, 3]
         >>> sequence2 = [2, 3, 4]
         >>> similarity = jaccard(sequence1, sequence2)
         >>> print(similarity)
-    ```
+        ```
     """
     numerator = len(set(sequence1).intersection(sequence2))
     denominator = len(set(sequence1).union(sequence2))
@@ -160,12 +160,12 @@ def hamming(sequence1: jnp.ndarray, sequence2: jnp.ndarray) -> int:
         int: Hamming similarity score.
 
     Example usage:
-    ```py
+        ```py
         >>> sequence1 = jnp.array([1, 2, 3, 4])
         >>> sequence2 = jnp.array([1, 2, 4, 4])
         >>> similarity = hamming_jax(sequence1, sequence2)
         >>> print(similarity)
-    ```
+        ```
     """
     return jnp.sum(sequence1 == sequence2)
 
@@ -186,14 +186,14 @@ def zero_pad_sequences(arr: jnp.array, max_length: int) -> jnp.array:
         jax.numpy.ndarray: The zero-padded array.
 
     Example usage:
-    ```py
+        ```py
         >>> arr = jnp.array([[1, 2, 3], [4, 5, 6]])
         >>> max_length = 5
         >>> padded_arr = zero_pad_sequences(arr, max_length)
         >>> print(padded_arr)
         [[1 2 3 0 0]
          [4 5 6 0 0]]
-    ```
+        ```
     """
     current_length = arr.shape[1]
     num_zeros = max_length - current_length
@@ -213,10 +213,10 @@ def entropy(probabilities: jnp.ndarray) -> float:
     Calculate the entropy of a probability distribution using JAX.
 
     Example usage:
-    ```
+        ```
         probabilities = jnp.array([0.25, 0.75])
         entropy_value = entropy(probabilities)
-    ```
+        ```
 
     Args:
         probabilities (jnp.ndarray): Array of probability values.
@@ -235,10 +235,10 @@ def gini_impurity(probabilities: jnp.ndarray) -> float:
     Calculate the Gini impurity of a probability distribution using JAX.
 
     Example usage:
-    ```
+        ```
         probabilities = jnp.array([0.25, 0.75])
         gini_value = gini_impurity(probabilities)
-    ```
+        ```
 
     Args:
         probabilities (jnp.ndarray): Array of probability values.
@@ -256,11 +256,11 @@ def kl_divergence(p: jnp.ndarray, q: jnp.ndarray) -> float:
     Calculate the Kullback-Leibler (KL) divergence between two probability distributions using JAX.
 
     Example usage:
-    ```
+        ```
         p = jnp.array([0.25, 0.75])
         q = jnp.array([0.5, 0.5])
         kl_value = kl_divergence(p, q)
-    ```
+        ```
 
     Args:
         p (jnp.ndarray): Array of probability values for distribution p.
@@ -279,11 +279,11 @@ def count_parameters(params: Any) -> int:
     Count the total number of parameters in a model's parameter dictionary using JAX.
 
     Example usage:
-    ```
+        ```
         model = MyModel()
         params = model.init(jax.random.PRNGKey(0), jnp.ones(input_shape))
         total_params = count_parameters(params)
-    ```
+        ```
 
     Args:
         params (Any): Model's parameter dictionary.

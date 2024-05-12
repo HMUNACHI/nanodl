@@ -18,11 +18,6 @@ class RotaryPositionalEncoding:
     Attributes:
         dim_model (int): The dimensionality of the model embeddings.
 
-    Methods:
-        _update_cos_sin_tables(x, seq_dimension): Updates cosine and sine tables based on the sequence length.
-        rotate_half(x): Rotates the last half of the dimensions of x by swapping them and changing signs to simulate a 90-degree rotation.
-        apply_rotary_pos_emb(x, cos, sin): Applies the rotary positional encoding to the input embeddings.
-        __call__(q, k): Applies rotary positional encoding to query and key tensors in attention mechanisms.
     """
 
     def __init__(self, dim_model: int):
@@ -79,11 +74,6 @@ class GroupedRotaryMultiHeadAttention(nn.Module):
         num_heads (int): Number of attention heads.
         num_groups (int): Number of groups to split the heads into for applying rotary positional embeddings separately.
 
-    Methods:
-        setup(): Initializes the projections for query, key, value, and output, along with the rotary positional encoder.
-        __call__(inputs, context, mask): Processes the input and context tensors through the grouped rotary multi-head attention mechanism.
-        process_group(query, key, value, mask): Processes a single group of heads through rotary positional encoding and attention.
-        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors.
     """
 
     hidden_dim: int  # Output dimension
@@ -217,10 +207,6 @@ class GemmaDecoderBlock(nn.Module):
         dropout (float): Dropout rate for regularization.
         num_groups (int): Number of groups for the grouped rotary positional embeddings.
 
-    Methods:
-        setup(): Initializes the components of the Gemma decoder block.
-        causal_mask(batch_size, destination_dim, source_dim): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism.
-        __call__(x, training): Processes the input tensor through the Gemma decoder block.
     """
 
     hidden_dim: int
@@ -290,9 +276,6 @@ class GemmaDecoder(nn.Module):
         vocab_size (float): Size of the vocabulary.
         embed_dim (float): Dimensionality of the token embeddings.
 
-    Methods:
-        setup(): Initializes the components of the LLaMA2 decoder.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the LLaMA2 decoder.
     """
 
     num_layers: int
@@ -356,8 +339,6 @@ class Gemma(nn.Module):
         end_token (int): Token that indicates the end of a generated sequence.
 
     Methods:
-        setup(): Initializes the LLaMA2 model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the LLaMA2 model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 

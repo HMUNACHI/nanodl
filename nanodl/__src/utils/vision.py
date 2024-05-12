@@ -17,11 +17,11 @@ def normalize_images(images: jnp.ndarray) -> jnp.ndarray:
         jnp.ndarray: Normalized images of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> images = jnp.array([[[[0.0, 0.5], [1.0, 0.25]]]])  # One image of shape (1, 2, 2, 1)
         >>> normalized_images = normalize_images(images)
         >>> print(normalized_images)
-    ```
+        ```
     """
     mean = images.mean(axis=(1, 2, 3), keepdims=True)
     std = images.std(axis=(1, 2, 3), keepdims=True)
@@ -45,12 +45,12 @@ def random_crop(images: jnp.ndarray, crop_size: int) -> jnp.ndarray:
         jax.numpy.ndarray: The cropped images, with shape (batch_size, crop_size, crop_size, channels).
 
     Example usage:
-    ```
+        ```
         >>> images = jnp.ones((10, 100, 100, 3))  # Batch of 10 images of size 100x100 with 3 channels
         >>> crop_size = 64
         >>> cropped_images = random_crop(images, crop_size)
         >>> print(cropped_images.shape)
-    ```
+        ```
     """
     key = jax.random.PRNGKey(int(time.time()))
     _, height, width, _ = images.shape
@@ -75,11 +75,11 @@ def gaussian_blur(image: jnp.ndarray, kernel_size: int, sigma: float) -> jnp.nda
         jnp.ndarray: Blurred image of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> blurred_image = gaussian_blur(image, kernel_size=3, sigma=1.0)
         >>> print(blurred_image.shape)
-    ```
+        ```
     """
     assert kernel_size % 2 == 1, "Kernel size must be odd."
     ax = jnp.arange(-kernel_size // 2 + 1.0, kernel_size // 2 + 1.0)
@@ -110,11 +110,11 @@ def sobel_edge_detection(image: jnp.ndarray) -> jnp.ndarray:
         jnp.ndarray: Image representing the edges, of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> edges = sobel_edge_detection(image)
         >>> print(edges.shape)
-    ```
+        ```
     """
     sobel_x = jnp.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=jnp.float32)
     sobel_y = jnp.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=jnp.float32)
@@ -148,11 +148,11 @@ def adjust_brightness(image: jnp.ndarray, factor: float) -> jnp.ndarray:
         jnp.ndarray: Brightness-adjusted image of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> adjusted_image = adjust_brightness(image, factor=1.5)
         >>> print(adjusted_image.shape)
-    ```
+        ```
     """
     return jnp.clip(image * factor, 0, 1)
 
@@ -171,11 +171,11 @@ def adjust_contrast(image: jnp.ndarray, factor: float) -> jnp.ndarray:
         jnp.ndarray: Contrast-adjusted image of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> adjusted_image = adjust_contrast(image, factor=1.5)
         >>> print(adjusted_image.shape)
-    ```
+        ```
     """
     mean = jnp.mean(image, axis=(0, 1), keepdims=True)
     return jnp.clip((image - mean) * factor + mean, 0, 1)
@@ -195,12 +195,12 @@ def flip_image(image: jnp.ndarray, horizontal: jnp.ndarray) -> jnp.ndarray:
         jnp.ndarray: Flipped image of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> flipped_image_horizontally = flip_image(image, jnp.array([True]))
         >>> flipped_image_vertically = flip_image(image, jnp.array([False]))
         >>> print(flipped_image_horizontally.shape, flipped_image_vertically.shape)
-    ```
+        ```
     """
     return jnp.where(horizontal, image[:, ::-1, :], image[::-1, :, :])
 
@@ -223,12 +223,12 @@ def random_flip_image(
         jnp.ndarray: Randomly flipped image of the same shape as the input.
 
     Example usage:
-    ```
+        ```
         >>> key = jax.random.PRNGKey(0)
         >>> image = jnp.ones((5, 5, 3))  # Example image with 3 channels
         >>> flipped_image = random_flip_image(image, key, jnp.array([True]))
         >>> print(flipped_image.shape)
-    ```
+        ```
     """
     flip = jax.random.uniform(key) > 0.5
     flip_horizontal = jnp.where(horizontal, image[:, ::-1, :], image)

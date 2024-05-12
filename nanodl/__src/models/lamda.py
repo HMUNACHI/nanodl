@@ -19,10 +19,6 @@ class RelativeMultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes the projections for query, key, value, and output.
-        __call__(inputs, context, mask, clip): Processes the input and context tensors through the relative multi-head attention mechanism.
-        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors, incorporating relative position information.
     """
 
     hidden_dim: int
@@ -129,9 +125,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -159,8 +152,6 @@ class AddNorm(nn.Module):
     Attributes:
         dropout (float): Dropout rate for the residual connection.
 
-    Methods:
-        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
 
     dropout: int
@@ -208,11 +199,7 @@ class LaMDABlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the LaMDA block.
-        causal_mask(batch_size, destination_dim, source_dim): Generates a causal mask to ensure autoregressive properties in the self-attention mechanism.
-        __call__(x, mask, training): Processes the input tensor through the LaMDA block.
-    """
+    M"""
 
     hidden_dim: int
     num_heads: int
@@ -280,9 +267,6 @@ class LaMDADecoder(nn.Module):
         vocab_size (float): Size of the vocabulary.
         embed_dim (float): Dimensionality of the token embeddings.
 
-    Methods:
-        setup(): Initializes the components of the LaMDA decoder.
-        __call__(x, mask, training, drop_last_layer): Processes the input tensor through the LaMDA decoder.
     """
 
     num_layers: int
@@ -348,8 +332,6 @@ class LaMDA(nn.Module):
         end_token (int): Token that indicates the end of a generated sequence.
 
     Methods:
-        setup(): Initializes the LaMDA model including the decoder component.
-        __call__(x, training, drop_last_layer): Processes the input tensor through the LaMDA model.
         generate(x, temperature, deterministic): Generates a sequence of tokens autoregressively.
         generate_batch(x, temperature, deterministic): Generates sequences of tokens for a batch of initial sequences autoregressively.
 

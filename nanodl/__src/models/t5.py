@@ -19,10 +19,6 @@ class RelativeMultiHeadAttention(nn.Module):
         hidden_dim (int): Dimensionality of the input and output features.
         num_heads (int): Number of attention heads.
 
-    Methods:
-        setup(): Initializes the projections for query, key, value, and output.
-        __call__(inputs, context, mask, clip): Processes the input and context tensors through the relative multi-head attention mechanism.
-        attention_function(query, key, value, mask): Computes the attention scores and applies them to the value vectors, incorporating relative position information.
     """
 
     hidden_dim: int  # Output dimension
@@ -129,9 +125,6 @@ class PositionWiseFFN(nn.Module):
         num_hiddens (int): The number of hidden units in the first linear layer.
         num_outputs (int): The number of output units in the second linear layer (usually the same as the model's hidden size).
 
-    Methods:
-        setup(): Initializes the two linear layers.
-        __call__(X: jnp.ndarray): Applies the position-wise feed-forward network to the input tensor.
     """
 
     num_hiddens: int
@@ -159,8 +152,6 @@ class AddNorm(nn.Module):
     Attributes:
         dropout (float): Dropout rate for the residual connection.
 
-    Methods:
-        __call__(X: jnp.ndarray, Y: jnp.ndarray, training=False): Applies dropout to the output of a sublayer (Y), adds it to the original input (X), and applies layer normalization.
     """
 
     dropout: int
@@ -185,9 +176,6 @@ class T5EncoderBlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the T5 encoder block.
-        __call__(x, mask, training): Processes the input tensor through the encoder block.
     """
 
     hidden_dim: int
@@ -229,9 +217,6 @@ class T5Encoder(nn.Module):
         vocab_size (float): Size of the vocabulary.
         embed_dim (float): Dimensionality of the token embeddings.
 
-    Methods:
-        setup(): Initializes the components of the T5 encoder.
-        __call__(x, mask, training): Processes the input tensor through the encoder.
     """
 
     num_layers: int
@@ -278,9 +263,6 @@ class T5DecoderBlock(nn.Module):
         feedforward_dim (int): Dimensionality of the inner layer of the feed-forward network.
         dropout (float): Dropout rate for regularization.
 
-    Methods:
-        setup(): Initializes the components of the T5 decoder block.
-        __call__(x, context, training): Processes the input tensor through the decoder block, incorporating context from the encoder.
     """
 
     hidden_dim: int
@@ -349,9 +331,6 @@ class T5Decoder(nn.Module):
         vocab_size (float): Size of the vocabulary.
         embed_dim (float): Dimensionality of the token embeddings.
 
-    Methods:
-        setup(): Initializes the components of the T5 decoder.
-        __call__(x, context, training): Processes the input tensor through the decoder, incorporating context from the encoder.
     """
 
     num_layers: int
@@ -413,8 +392,6 @@ class T5(nn.Module):
         end_token (int): Token that indicates the end of a generated sequence.
 
     Methods:
-        setup(): Initializes the T5 model including both the encoder and decoder components.
-        __call__(x, y, training): Processes the input tensor through the T5 model, generating predictions.
         generate(x, temperature, deterministic): Generates output sequences from input sequences.
         generate_batch(x, temperature, deterministic): Generates output sequences for a batch of input sequences.
 

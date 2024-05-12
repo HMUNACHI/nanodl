@@ -417,6 +417,25 @@ class IJEPA(nn.Module):
 
 
 class IJEPADataSampler:
+    """
+    Implements a data sampler for the IJEPA model.
+
+    The data sampler is used to sample data for the IJEPA model. 
+    It samples the scale of the target block using a uniform random distribution and scales it within the target scale range. 
+    Also samples the scale of the context using a uniform random distribution and scales it within the context scale range.
+
+    Attributes:
+        image_size (int): The size of the image.
+        patch_size (int): The size of the patches into which the image is divided.
+        M (int): The number of patches.
+        context_scale_range (tuple): The range of scales for the context.
+        target_scale_range (tuple): The range of scales for the target.
+        target_aspect_ratio_range (tuple): The range of aspect ratios for the target.
+        h (int): The height of the image divided by the patch size.
+        w (int): The width of the image divided by the patch size.
+        to_scale (function): A function to scale a value within a specified range.
+        random_key (int): A seed for generating random numbers.
+    """
     to_scale: Any = lambda self, x, a, b: (b - a) * x + a
     random_key: int = 0
     random_key = jax.random.PRNGKey(random_key)
@@ -520,6 +539,26 @@ class IJEPADataSampler:
 
 
 class IJEPADataParallelTrainer:
+    """
+    Implements a parallel trainer for the IJEPA model.
+
+    The IJEPADataParallelTrainer is used to train the IJEPA model in parallel. 
+    
+    Attributes:
+        model (Any): The model to be trained.
+        input_shape (Tuple[int, ...]): The shape of the input data.
+        weights_filename (str): The filename of the weights of the model.
+        data_sampler (IJEPADataSampler): The data sampler used to sample data for training.
+        learning_rate (float): The learning rate for training. Default is 1e-4.
+        params_path (str, optional): The path to the parameters of the model. Default is None.
+        params (Any): The parameters of the model. Initialized as None.
+        num_parameters (int): The number of parameters in the model. Initialized as None.
+        best_val_loss (float): The best validation loss achieved during training. Initialized as infinity.
+        num_devices (int): The number of devices used for training.
+        train_step (function): The function used to perform a training step.
+        evaluation_step (function): The function used to perform an evaluation step.
+        state (Any): The state of the model during training.
+    """
     def __init__(
         self,
         model: Any,

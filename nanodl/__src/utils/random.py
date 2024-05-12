@@ -18,18 +18,18 @@ def time_rng_key(seed=None) -> jnp.ndarray:
 
 def uniform(
     shape: Tuple[int, ...],
-    dtype: Any = jnp.float32,
-    minval: float = 0.0,
-    maxval: float = 1.0,
+    minval: Any = 0.0,
+    maxval: Any = 1.0,
     seed=None,
+    dtype: Any = jnp.float32,
 ) -> jnp.ndarray:
     """Generate a tensor of uniform random values.
 
     Args:
         shape (Tuple[int, ...]): The shape of the output tensor.
         dtype (Any, optional): The data type of the output tensor. Defaults to jnp.float32.
-        minval (float, optional): The lower bound of the uniform distribution. Defaults to 0.0.
-        maxval (float, optional): The upper bound of the uniform distribution. Defaults to 1.0.
+        minval (Any, optional): The lower bound of the uniform distribution. Defaults to 0.0.
+        maxval (Any, optional): The upper bound of the uniform distribution. Defaults to 1.0.
 
     Returns:
         jnp.ndarray: A tensor of uniform random values.

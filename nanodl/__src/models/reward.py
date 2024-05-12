@@ -16,59 +16,64 @@ class RewardModel(nn.Module):
     It uses the last hidden state of a transformer-based model to generate a scalar reward prediction,
     guiding the agent's behavior by evaluating the desirability or utility of its generated outputs.
 
+    Args:
+        model (nn.Module): The neural network model to be used.
+        dim (int): The dimension of the input data.
+        dropout (float): The dropout rate for the model, a value between 0 and 1. 
+
     Example:
-    ```python
-    from nanodl import ArrayDataset, DataLoader
-    from nanodl import Gemma, RewardModel, RewardDataParallelTrainer
+        ```python
+        from nanodl import ArrayDataset, DataLoader
+        from nanodl import Gemma, RewardModel, RewardDataParallelTrainer
 
-    # Generate dummy data
-    batch_size = 8
-    max_length = 10
+        # Generate dummy data
+        batch_size = 8
+        max_length = 10
 
-    # Replace with actual tokenised data
-    dummy_chosen = jnp.ones((101, max_length), dtype=jnp.int32)
-    dummy_rejected = jnp.zeros((101, max_length), dtype=jnp.int32)
+        # Replace with actual tokenised data
+        dummy_chosen = jnp.ones((101, max_length), dtype=jnp.int32)
+        dummy_rejected = jnp.zeros((101, max_length), dtype=jnp.int32)
 
-    # Create dataset and dataloader
-    dataset = ArrayDataset(dummy_chosen, dummy_rejected)
-    dataloader = DataLoader(dataset,
-                            batch_size=batch_size,
-                            shuffle=True,
-                            drop_last=False)
+        # Create dataset and dataloader
+        dataset = ArrayDataset(dummy_chosen, dummy_rejected)
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
+                                drop_last=False)
 
-    # model parameters
-    hyperparams = {
-        'num_layers': 1,
-        'hidden_dim': 256,
-        'num_heads': 2,
-        'feedforward_dim': 256,
-        'dropout': 0.1,
-        'vocab_size': 1000,
-        'embed_dim': 256,
-        'max_length': max_length,
-        'start_token': 0,
-        'end_token': 50,
-        'num_groups': 2,
-    }
+        # model parameters
+        hyperparams = {
+            'num_layers': 1,
+            'hidden_dim': 256,
+            'num_heads': 2,
+            'feedforward_dim': 256,
+            'dropout': 0.1,
+            'vocab_size': 1000,
+            'embed_dim': 256,
+            'max_length': max_length,
+            'start_token': 0,
+            'end_token': 50,
+            'num_groups': 2,
+        }
 
-    # Initialize reward model from Gemma
-    model = Gemma(**hyperparams)
-    reward_model = RewardModel(model, dim=hyperparams['hidden_dim'], dropout=0.1)
+        # Initialize reward model from Gemma
+        model = Gemma(**hyperparams)
+        reward_model = RewardModel(model, dim=hyperparams['hidden_dim'], dropout=0.1)
 
-    # Train the reward model
-    trainer = RewardDataParallelTrainer(reward_model, dummy_chosen.shape, 'reward_model_weights.pkl')
-    trainer.train(dataloader, 5, dataloader)
-    params = trainer.load_params('reward_model_weights.pkl')
+        # Train the reward model
+        trainer = RewardDataParallelTrainer(reward_model, dummy_chosen.shape, 'reward_model_weights.pkl')
+        trainer.train(dataloader, 5, dataloader)
+        params = trainer.load_params('reward_model_weights.pkl')
 
-    # Call as you would a regular Flax model
-    rngs = jax.random.PRNGKey(0)
-    rngs, dropout_rng = jax.random.split(rngs)
-    rewards = reward_model.apply({'params': params},
-                        dummy_chosen,
-                        rngs={'dropout': dropout_rng})
+        # Call as you would a regular Flax model
+        rngs = jax.random.PRNGKey(0)
+        rngs, dropout_rng = jax.random.split(rngs)
+        rewards = reward_model.apply({'params': params},
+                            dummy_chosen,
+                            rngs={'dropout': dropout_rng})
 
-    print(rewards.shape)
-    ```
+        print(rewards.shape)
+        ```
     """
 
     model: nn.Module
