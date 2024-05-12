@@ -294,8 +294,8 @@ This is still in dev, works great but roughness is expected, and contributions a
 
 - Make your changes without changing the design patterns.
 - Write tests for your changes if necessary.
-- Install locally with `pip install -e .`.
-- Run tests with `python -m unittest discover -s tests`.
+- Install locally with `pip3 install -e .`.
+- Run tests with `python3 -m unittest discover -s tests`.
 - Then submit a pull request.
 
 Contributions can be made in various forms:
