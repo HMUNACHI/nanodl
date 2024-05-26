@@ -1,4 +1,4 @@
-__version__ = "1.2.4.dev1"
+__version__ = "1.2.5.dev1"
 
 from nanodl.__src.classical.bayes import NaiveBayesClassifier
 from nanodl.__src.classical.clustering import GaussianMixtureModel, KMeans
